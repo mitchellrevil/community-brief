@@ -18,6 +18,7 @@ variables:
   nodeVersion: '22.x'
   pipCacheDir: '$(Pipeline.Workspace)/.pip'
   pnpmStoreDir: '$(Pipeline.Workspace)/.pnpm-store'
+  frontendWorkingDir: 'frontend_app'
 
   environmentName: $[iif(eq(variables['Build.SourceBranch'], 'refs/heads/main'), 'prod', 'dev')]
   serviceConnection: $[iif(eq(variables['Build.SourceBranch'], 'refs/heads/main'), 'Azure-Subscription-Prod', 'Azure-Subscription-Dev')]
@@ -148,11 +149,12 @@ stages:
             inputs:
               version: $(nodeVersion)
 
-          - script: npm install --global corepack@latest
-            displayName: Update Corepack
-
-          - script: corepack enable
-            displayName: Enable pnpm
+          - script: |
+              npm install --global corepack@latest
+              corepack enable
+              corepack prepare "$(node -p 'require("./$(frontendWorkingDir)/package.json").packageManager')" --activate
+              pnpm --version
+            displayName: Activate repo pnpm
 
           - script: mkdir -p "$(pnpmStoreDir)"
             displayName: Prepare pnpm cache
@@ -160,46 +162,40 @@ stages:
           - task: Cache@2
             displayName: Cache pnpm store
             inputs:
-              key: 'pnpm | "$(Agent.OS)" | frontend_app/pnpm-lock.yaml'
+              key: 'pnpm | "$(Agent.OS)" | $(nodeVersion) | $(frontendWorkingDir)/pnpm-lock.yaml'
               restoreKeys: |
+                pnpm | "$(Agent.OS)" | $(nodeVersion)
                 pnpm | "$(Agent.OS)"
               path: $(pnpmStoreDir)
 
           - script: |
-              cd frontend_app
+              cd "$(frontendWorkingDir)"
               pnpm config set store-dir "$(pnpmStoreDir)"
               pnpm install --frozen-lockfile
               pnpm run type-check
               pnpm run lint
             displayName: Check frontend
+            env:
+              CI: true
 
           - script: |
-              cd frontend_app
-              api_url="$(viteApiUrl)"
-              client_id="$(viteClientId)"
-              tenant_id="$(viteTenantId)"
-              entra_api_scope="$(viteEntraApiScope)"
-              development_flag="$(viteDevelopment)"
-              if [ -z "$api_url" ]; then
-                api_url="/api"
-              fi
-              if [ -z "$development_flag" ]; then
-                development_flag="false"
-              fi
-              {
-                printf 'VITE_API_URL=%s\n' "$api_url"
-                printf 'VITE_CLIENT_ID=%s\n' "$client_id"
-                printf 'VITE_TENANT_ID=%s\n' "$tenant_id"
-                printf 'VITE_ENTRA_API_SCOPE=%s\n' "$entra_api_scope"
-                printf 'VITE_DEVELOPMENT=%s\n' "$development_flag"
-              } > .env.ci
-              cp .env.ci .env
+              cd "$(frontendWorkingDir)"
+              export VITE_API_URL="${VITE_API_URL:-/api}"
+              export VITE_DEVELOPMENT="${VITE_DEVELOPMENT:-false}"
+              rm -rf dist
               pnpm run build
               test -f dist/index.html
               cp staticwebapp.config.json dist/
             displayName: Build frontend
+            env:
+              CI: true
+              VITE_API_URL: $(viteApiUrl)
+              VITE_CLIENT_ID: $(viteClientId)
+              VITE_TENANT_ID: $(viteTenantId)
+              VITE_ENTRA_API_SCOPE: $(viteEntraApiScope)
+              VITE_DEVELOPMENT: $(viteDevelopment)
 
-          - publish: frontend_app/dist
+          - publish: $(frontendWorkingDir)/dist
             artifact: frontend
             displayName: Publish frontend package
 
@@ -275,7 +271,8 @@ stages:
                   inputs:
                     workingDirectory: $(Pipeline.Workspace)
                     app_location: frontend
-                    output_location: ''
+                    config_file_location: frontend
+                    skip_app_build: true
                     skip_api_build: true
                     azure_static_web_apps_api_token: $(staticWebAppToken)
                   condition: and(succeeded(), ne(variables['staticWebAppToken'], ''))

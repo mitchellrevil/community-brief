@@ -230,7 +230,11 @@ describe("HTTP client interceptors", () => {
       expect(mockLocalStorageRemove).toHaveBeenCalledWith("user");
       expect(mockLocalStorageRemove).toHaveBeenCalledWith("profile");
       expect(mockSessionStorageRemoveItem).toHaveBeenCalledWith(
+<<<<<<< HEAD
         "community_brief_password_auth_token",
+=======
+        "community_brief_password_auth_token",
+>>>>>>> f46302a9 (Enhance CI/CD pipeline and frontend build process: add frontend working directory variable, activate pnpm, and improve caching; introduce pnpm workspace configuration; refactor API and test files for better structure and readability.)
       );
       expect(mockDispatchEvent).toHaveBeenCalledTimes(1);
       expect(mockLocationReplace).not.toHaveBeenCalled();
@@ -383,3 +387,4 @@ declare module "axios" {
     _retry?: boolean;
   }
 }
+
