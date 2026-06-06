@@ -94,6 +94,17 @@ stages:
                 requirements.txt
               TargetFolder: $(Build.ArtifactStagingDirectory)/backend
 
+          - script: |
+              python -m pip install --upgrade pip
+              python -m pip install \
+                -r backend_app/requirements.txt \
+                --target "$(Build.ArtifactStagingDirectory)/backend/.python_packages/lib/site-packages" \
+                --platform manylinux2014_x86_64 \
+                --only-binary=:all: \
+                --python-version 311 \
+                --implementation cp
+            displayName: Vendor backend dependencies
+
           - task: ArchiveFiles@2
             displayName: Zip backend
             inputs:
@@ -226,7 +237,6 @@ stages:
                     appSettings: >-
                       -SCM_DO_BUILD_DURING_DEPLOYMENT true
                       -ENABLE_ORYX_BUILD true
-                      -WEBSITE_RUN_FROM_PACKAGE 1
                       -VITE_CLIENT_ID $(viteClientId)
                       -VITE_TENANT_ID $(viteTenantId)
                       -VITE_ENTRA_API_SCOPE $(viteEntraApiScope)
