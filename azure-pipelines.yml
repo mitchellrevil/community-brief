@@ -162,9 +162,9 @@ stages:
           - task: Cache@2
             displayName: Cache pnpm store
             inputs:
-              key: 'pnpm | "$(Agent.OS)" | $(nodeVersion) | $(frontendWorkingDir)/pnpm-lock.yaml'
+              key: 'pnpm | "$(Agent.OS)" | "$(nodeVersion)" | $(frontendWorkingDir)/pnpm-lock.yaml'
               restoreKeys: |
-                pnpm | "$(Agent.OS)" | $(nodeVersion)
+                pnpm | "$(Agent.OS)" | "$(nodeVersion)"
                 pnpm | "$(Agent.OS)"
               path: $(pnpmStoreDir)
 
