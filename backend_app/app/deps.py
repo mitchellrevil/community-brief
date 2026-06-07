@@ -31,7 +31,7 @@ def get_app_config(request: Request) -> AppConfig:
 
 def get_error_handler(
     *,
-    logger_name: str = "community_brief.api",
+    logger_name: str = "sonic_brief.api",
 ) -> ErrorHandler:
     """Return the default structured error handler used across routers."""
     return DefaultErrorHandler(lambda: get_logger(logger_name), base_context=None)
@@ -133,7 +133,7 @@ def get_announcement_service(request: Request):
 
 def get_prompt_service(
     cosmos_service: CosmosService = Depends(get_cosmos_service),
-    request: Request = None,
+    request: Request | None = None,
 ):
     """Provide PromptService with dependency injection
     
@@ -175,7 +175,7 @@ def get_job_service(
     cosmos_service: CosmosService = Depends(get_cosmos_service),
     storage_service = Depends(get_storage_service),
     prompt_service = Depends(get_prompt_service),
-    request: Request = None,
+    request: Request | None = None,
 ):
     """Provide JobService with request-scoped dependencies."""
     from .repositories.jobs import JobRepository

@@ -1,5 +1,7 @@
 """Read-side prompt workflows and visibility filtering."""
 from __future__ import annotations
+
+import copy
 from typing import Any, Dict, List, Optional
 
 from ...core.config import DatabaseError
@@ -14,8 +16,8 @@ from ...services.interfaces import PromptServiceInterface, TalkingPointsServiceI
 
 
 class PromptReadService:
-    _list_subcategories_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
-    _retrieve_prompts_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
+    _list_subcategories_cache = TTLCache[Dict[str, Any]](default_ttl=10.0)
+    _retrieve_prompts_cache = TTLCache[Dict[str, Any]](default_ttl=10.0)
 
     def __init__(
         self,
@@ -69,7 +71,8 @@ class PromptReadService:
                 "has_more": False,
             }
 
-        return await self._list_subcategories_cache.get_or_compute(cache_key, compute)
+        cached = await self._list_subcategories_cache.get_or_compute(cache_key, compute)
+        return copy.deepcopy(cached)
 
     async def get_subcategory(
         self,
@@ -113,7 +116,8 @@ class PromptReadService:
 
             return {"status": 200, "data": filtered_data}
 
-        return await self._retrieve_prompts_cache.get_or_compute(cache_key, compute)
+        cached = await self._retrieve_prompts_cache.get_or_compute(cache_key, compute)
+        return copy.deepcopy(cached)
 
     def _ensure_talking_points(self, subcategory: Dict[str, Any]) -> Dict[str, Any]:
         if not self.talking_points_service:
@@ -156,3 +160,4 @@ class PromptReadService:
             status_code=503,
             details={"action": action},
         )
+
