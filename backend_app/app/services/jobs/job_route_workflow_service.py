@@ -15,6 +15,11 @@ from .job_service import JobService
 _jobs_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
 
 
+async def invalidate_job_list_cache() -> None:
+    """Clear cached job list responses after writes affect list freshness."""
+    await _jobs_cache.invalidate("jobs:")
+
+
 class JobRouteWorkflowService:
     def __init__(
         self,

@@ -12,7 +12,12 @@ from fastapi import HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from azure.cosmos.exceptions import CosmosHttpResponseError
 
-from app.core.auth import clear_resolved_auth_user_cache, get_current_user, get_current_user_sse
+from app.core.auth import (
+    clear_resolved_auth_user_cache,
+    clear_resolved_auth_user_cache_for_user,
+    get_current_user,
+    get_current_user_sse,
+)
 
 
 # Mark all tests as unit tests
@@ -345,6 +350,50 @@ class TestGetCurrentUserCrossRequestCaching:
         assert second_result["id"] == "user_123"
         assert mock_decode.call_count == 1
         mock_user_repository.get_by_id.assert_called_once_with("user_123")
+
+    @pytest.mark.asyncio
+    async def test_invalidating_user_cache_forces_token_re_resolution(
+        self,
+        mock_user_repository,
+        mock_config,
+    ):
+        first_request = MagicMock(spec=Request)
+        first_request.state = MagicMock()
+        first_request.state.current_user = None
+        first_request.headers = {}
+        first_request.cookies = {}
+        first_request.app = MagicMock()
+        first_request.app.state.config = mock_config
+
+        second_request = MagicMock(spec=Request)
+        second_request.state = MagicMock()
+        second_request.state.current_user = None
+        second_request.headers = {}
+        second_request.cookies = {}
+        second_request.app = MagicMock()
+        second_request.app.state.config = mock_config
+
+        mock_user_repository.get_by_id.return_value = create_user()
+
+        with patch("app.services.auth.identity_service.decode_token") as mock_decode:
+            mock_decode.return_value = create_jwt_payload()
+
+            await get_current_user(
+                first_request,
+                HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_HS_TOKEN),
+                mock_user_repository,
+                mock_config,
+            )
+            await clear_resolved_auth_user_cache_for_user("user_123")
+            await get_current_user(
+                second_request,
+                HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_HS_TOKEN),
+                mock_user_repository,
+                mock_config,
+            )
+
+        assert mock_decode.call_count == 2
+        assert mock_user_repository.get_by_id.await_count == 2
 
 
 # =====================================================================# TEST: get_current_user - Caching
