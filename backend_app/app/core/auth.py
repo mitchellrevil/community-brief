@@ -26,7 +26,7 @@ logger = get_logger(__name__)
 
 security = HTTPBearer(auto_error=False)
 ACCESS_COOKIE_NAME = "access_token"
-_resolved_auth_user_cache = TTLCache[Dict[str, Any]](default_ttl=15.0)
+_resolved_auth_user_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
 
 
 async def clear_resolved_auth_user_cache(token: str | None = None) -> None:

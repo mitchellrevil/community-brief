@@ -6,7 +6,6 @@ announcements based on user role and time constraints.
 """
 
 from datetime import UTC, datetime
-import copy
 from typing import Dict, Any, Optional, List
 from uuid import uuid4
 
@@ -17,8 +16,8 @@ from ..utils.cache_utils import TTLCache
 
 logger = get_logger(__name__)
 
-_active_announcements_cache = TTLCache[List[Dict[str, Any]]](default_ttl=30.0)
-_announcement_by_id_cache = TTLCache[Dict[str, Any]](default_ttl=60.0)
+_active_announcements_cache = TTLCache[List[Dict[str, Any]]](default_ttl=600.0)
+_announcement_by_id_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
 
 
 class AnnouncementService(AnnouncementServiceInterface):
@@ -96,11 +95,11 @@ class AnnouncementService(AnnouncementServiceInterface):
         cache_key = f"announcement:{announcement_id}"
         cached = await _announcement_by_id_cache.get(cache_key)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached
 
         announcement = await self._announcement_repository.get_by_id(announcement_id)
         if announcement is not None:
-            await _announcement_by_id_cache.set(cache_key, copy.deepcopy(announcement))
+            await _announcement_by_id_cache.set(cache_key, announcement)
         return announcement
     
     async def update_announcement(
@@ -196,7 +195,7 @@ class AnnouncementService(AnnouncementServiceInterface):
         cache_key = self._active_cache_key(user)
         cached = await _active_announcements_cache.get(cache_key)
         if cached is not None:
-            return copy.deepcopy(cached)
+            return cached
 
         now_ms = self._epoch_ms()
         user_role = user.get("permission", "USER")
@@ -224,7 +223,7 @@ class AnnouncementService(AnnouncementServiceInterface):
             user_email=user_email,
             user_service_areas=user_service_areas,
         )
-        await _active_announcements_cache.set(cache_key, copy.deepcopy(announcements))
+        await _active_announcements_cache.set(cache_key, announcements)
         return announcements
 
     async def mark_announcement_read(

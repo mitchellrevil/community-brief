@@ -12,7 +12,7 @@ from .job_permissions import JobPermissions, check_job_access
 from .job_service import JobService
 
 
-_jobs_cache = TTLCache[Dict[str, Any]](default_ttl=30.0)
+_jobs_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
 
 
 class JobRouteWorkflowService:

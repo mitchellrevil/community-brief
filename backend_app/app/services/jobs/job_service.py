@@ -15,7 +15,7 @@ JOB_SERVICE_ERRORS = (RuntimeError, OSError, ValueError, TypeError)
 JOB_PROMPT_SETTINGS_ERRORS = (RuntimeError, ValueError, TypeError, KeyError)
 
 
-_job_cache = TTLCache(default_ttl=15.0)
+_job_cache = TTLCache(default_ttl=60.0)
 
 
 class JobService:
