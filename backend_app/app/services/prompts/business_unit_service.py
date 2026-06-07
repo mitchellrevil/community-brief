@@ -1,4 +1,5 @@
 from typing import List, Optional, Dict, Any
+import copy
 
 from ...core.logging import get_logger
 from ...repositories.business_units import BusinessUnitStatsRepository
@@ -6,7 +7,7 @@ from ...utils.cache_utils import TTLCache
 
 logger = get_logger(__name__)
 
-_business_unit_list_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
+_business_unit_list_cache = TTLCache[Dict[str, Any]](default_ttl=15.0)
 
 
 class BusinessUnitService:
@@ -37,7 +38,7 @@ class BusinessUnitService:
         cache_key = f"{limit}:{offset}"
         cached = await _business_unit_list_cache.get(cache_key)
         if cached is not None:
-            return cached
+            return copy.deepcopy(cached)
 
         all_result = await self.prompt_service.list_categories(limit=1000, offset=0)
         all_categories = all_result.get("items", [])
@@ -45,7 +46,7 @@ class BusinessUnitService:
         total = len(all_business_units)
         paginated = all_business_units[offset: offset + limit]
         result = {"items": paginated, "total": total, "limit": limit, "offset": offset}
-        await _business_unit_list_cache.set(cache_key, result)
+        await _business_unit_list_cache.set(cache_key, copy.deepcopy(result))
         return result
 
     async def get_business_unit(self, bu_id: str) -> Optional[Dict[str, Any]]:
