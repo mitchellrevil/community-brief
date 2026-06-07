@@ -133,7 +133,7 @@ def get_announcement_service(request: Request):
 
 def get_prompt_service(
     cosmos_service: CosmosService = Depends(get_cosmos_service),
-    request: Request | None = None,
+    request: Request = None,
 ):
     """Provide PromptService with dependency injection
     
@@ -175,7 +175,7 @@ def get_job_service(
     cosmos_service: CosmosService = Depends(get_cosmos_service),
     storage_service = Depends(get_storage_service),
     prompt_service = Depends(get_prompt_service),
-    request: Request | None = None,
+    request: Request = None,
 ):
     """Provide JobService with request-scoped dependencies."""
     from .repositories.jobs import JobRepository
