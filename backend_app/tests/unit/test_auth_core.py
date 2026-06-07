@@ -12,12 +12,7 @@ from fastapi import HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from azure.cosmos.exceptions import CosmosHttpResponseError
 
-from app.core.auth import (
-    clear_resolved_auth_user_cache,
-    clear_resolved_auth_user_cache_for_user,
-    get_current_user,
-    get_current_user_sse,
-)
+from app.core.auth import get_current_user, get_current_user_sse
 
 
 # Mark all tests as unit tests
@@ -27,10 +22,8 @@ VALID_HS_TOKEN = "eyJhbGciOiJIUzI1NiJ9.e30."
 VALID_RS_TOKEN = "eyJhbGciOiJSUzI1NiJ9.e30."
 
 
-# ============================================================================
-# FIXTURES
-# ============================================================================
-
+# =====================================================================# FIXTURES
+# =====================================================================
 @pytest.fixture
 def mock_request():
     """Create a mock Request object."""
@@ -77,13 +70,6 @@ def mock_user_repository():
     return service
 
 
-@pytest.fixture(autouse=True)
-async def clear_auth_cache():
-    await clear_resolved_auth_user_cache()
-    yield
-    await clear_resolved_auth_user_cache()
-
-
 def create_user(
     user_id: str = "user_123",
     email: str = "user@example.com",
@@ -109,10 +95,8 @@ def create_jwt_payload(
     }
 
 
-# ============================================================================
-# TEST: get_current_user - Token Decoding
-# ============================================================================
-
+# =====================================================================# TEST: get_current_user - Token Decoding
+# =====================================================================
 class TestGetCurrentUserTokenDecoding:
     """Tests for token decoding in get_current_user."""
     
@@ -155,10 +139,8 @@ class TestGetCurrentUserTokenDecoding:
             assert "missing subject/email" in exc_info.value.detail
 
 
-# ============================================================================
-# TEST: get_current_user - User Lookup
-# ============================================================================
-
+# =====================================================================# TEST: get_current_user - User Lookup
+# =====================================================================
 class TestGetCurrentUserLookup:
     """Tests for user lookup in get_current_user."""
     
@@ -275,7 +257,7 @@ class TestGetCurrentUserLookup:
     ):
         """Given an Entra access token, when authenticating, then resolves linked user."""
         mock_credentials.credentials = VALID_RS_TOKEN
-        mock_config.entra_api_scope = "api://community-brief/access_as_user"
+        mock_config.entra_api_scope = "api://sonic-brief/access_as_user"
         mock_config.microsoft_client_id = "client-123"
         mock_config.microsoft_tenant_id = "tenant-123"
         mock_config.microsoft_jwks_timeout_seconds = 2.5
@@ -357,55 +339,9 @@ class TestGetCurrentUserCrossRequestCaching:
         assert mock_decode.call_count == 1
         mock_user_repository.get_by_id.assert_called_once_with("user_123")
 
-    @pytest.mark.asyncio
-    async def test_invalidating_user_cache_forces_token_re_resolution(
-        self,
-        mock_user_repository,
-        mock_config,
-    ):
-        first_request = MagicMock(spec=Request)
-        first_request.state = MagicMock()
-        first_request.state.current_user = None
-        first_request.headers = {}
-        first_request.cookies = {}
-        first_request.app = MagicMock()
-        first_request.app.state.config = mock_config
 
-        second_request = MagicMock(spec=Request)
-        second_request.state = MagicMock()
-        second_request.state.current_user = None
-        second_request.headers = {}
-        second_request.cookies = {}
-        second_request.app = MagicMock()
-        second_request.app.state.config = mock_config
-
-        mock_user_repository.get_by_id.return_value = create_user()
-
-        with patch("app.services.auth.identity_service.decode_token") as mock_decode:
-            mock_decode.return_value = create_jwt_payload()
-
-            await get_current_user(
-                first_request,
-                HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_HS_TOKEN),
-                mock_user_repository,
-                mock_config,
-            )
-            await clear_resolved_auth_user_cache_for_user("user_123")
-            await get_current_user(
-                second_request,
-                HTTPAuthorizationCredentials(scheme="Bearer", credentials=VALID_HS_TOKEN),
-                mock_user_repository,
-                mock_config,
-            )
-
-        assert mock_decode.call_count == 2
-        assert mock_user_repository.get_by_id.await_count == 2
-
-
-# ============================================================================
-# TEST: get_current_user - Caching
-# ============================================================================
-
+# =====================================================================# TEST: get_current_user - Caching
+# =====================================================================
 class TestGetCurrentUserCaching:
     """Tests for user caching in get_current_user."""
     
@@ -447,10 +383,8 @@ class TestGetCurrentUserCaching:
             assert mock_request.state.current_user is not None
 
 
-# ============================================================================
-# TEST: get_current_user - Error Handling
-# ============================================================================
-
+# =====================================================================# TEST: get_current_user - Error Handling
+# =====================================================================
 class TestGetCurrentUserErrorHandling:
     """Tests for error handling in get_current_user."""
     
@@ -495,10 +429,8 @@ class TestGetCurrentUserErrorHandling:
                 )
 
 
-# ============================================================================
-# TEST: get_current_user_sse - Token Sources
-# ============================================================================
-
+# =====================================================================# TEST: get_current_user_sse - Token Sources
+# =====================================================================
 class TestGetCurrentUserSseTokenSources:
     """Tests for token source handling in get_current_user_sse."""
     
@@ -561,10 +493,8 @@ class TestGetCurrentUserSseTokenSources:
         assert "Missing authentication token" in exc_info.value.detail
 
 
-# ============================================================================
-# TEST: get_current_user_sse - User Lookup
-# ============================================================================
-
+# =====================================================================# TEST: get_current_user_sse - User Lookup
+# =====================================================================
 class TestGetCurrentUserSseLookup:
     """Tests for user lookup in get_current_user_sse."""
     
@@ -611,10 +541,8 @@ class TestGetCurrentUserSseLookup:
             assert "User not found" in exc_info.value.detail
 
 
-# ============================================================================
-# TEST: get_current_user_sse - Error Handling
-# ============================================================================
-
+# =====================================================================# TEST: get_current_user_sse - Error Handling
+# =====================================================================
 class TestGetCurrentUserSseErrorHandling:
     """Tests for error handling in get_current_user_sse."""
     

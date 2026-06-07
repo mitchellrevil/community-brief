@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import copy
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, List
@@ -27,64 +26,7 @@ logger = get_logger(__name__)
 
 security = HTTPBearer(auto_error=False)
 ACCESS_COOKIE_NAME = "access_token"
-_resolved_auth_user_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
-_auth_cache_index_lock = asyncio.Lock()
-_auth_cache_tokens_by_user_id: Dict[str, set[str]] = {}
-_auth_cache_user_ids_by_token: Dict[str, set[str]] = {}
-
-
-async def _index_cached_auth_user(token: str, user: Dict[str, Any]) -> None:
-    user_id = user.get("id")
-    if not user_id:
-        return
-
-    async with _auth_cache_index_lock:
-        token_users = _auth_cache_user_ids_by_token.setdefault(token, set())
-        token_users.add(user_id)
-        user_tokens = _auth_cache_tokens_by_user_id.setdefault(user_id, set())
-        user_tokens.add(token)
-
-
-async def _drop_cached_auth_token(token: str) -> None:
-    async with _auth_cache_index_lock:
-        user_ids = _auth_cache_user_ids_by_token.pop(token, set())
-        for user_id in user_ids:
-            user_tokens = _auth_cache_tokens_by_user_id.get(user_id)
-            if not user_tokens:
-                continue
-            user_tokens.discard(token)
-            if not user_tokens:
-                _auth_cache_tokens_by_user_id.pop(user_id, None)
-
-
-async def clear_resolved_auth_user_cache(token: str | None = None) -> None:
-    """Clear the shared resolved-user cache.
-
-    When a token is provided, only matching entries are removed. Otherwise the
-    entire cache is cleared. This is primarily useful for tests and cache
-    invalidation hooks.
-    """
-    if token is None:
-        await _resolved_auth_user_cache.clear()
-        async with _auth_cache_index_lock:
-            _auth_cache_tokens_by_user_id.clear()
-            _auth_cache_user_ids_by_token.clear()
-        return
-    await _resolved_auth_user_cache.invalidate(f"token:{token}")
-    await _drop_cached_auth_token(token)
-
-
-async def clear_resolved_auth_user_cache_for_user(user_id: str | None) -> None:
-    """Clear cached auth resolutions for a specific user id."""
-    if not user_id:
-        return
-
-    async with _auth_cache_index_lock:
-        tokens = list(_auth_cache_tokens_by_user_id.get(user_id, set()))
-
-    for token in tokens:
-        await _resolved_auth_user_cache.invalidate(f"token:{token}")
-        await _drop_cached_auth_token(token)
+_resolved_auth_user_cache = TTLCache[Dict[str, Any]](default_ttl=15.0)
 
 def get_app_config(request: Request) -> AppConfig:
     """Return the application configuration instance from app state."""
@@ -122,9 +64,7 @@ async def _resolve_current_user_from_token(
     if cached_user is not None:
         return cached_user
 
-    # Token resolution only depends on the token itself; keeping the key token-only
-    # avoids accidental cache misses when request-scoped dependency objects differ.
-    cache_key = f"token:{token}"
+    cache_key = f"{id(user_repository)}:{id(config)}:{token}"
     cached_user = await _resolved_auth_user_cache.get(cache_key)
     if cached_user is not None:
         request.state.current_user = copy.deepcopy(cached_user)
@@ -139,7 +79,6 @@ async def _resolve_current_user_from_token(
     ).resolve_bearer_token(token)
     cached_copy = copy.deepcopy(user)
     await _resolved_auth_user_cache.set(cache_key, cached_copy)
-    await _index_cached_auth_user(token, cached_copy)
     request.state.current_user = user
     return user
 
