@@ -16,8 +16,8 @@ from ...services.interfaces import PromptServiceInterface, TalkingPointsServiceI
 
 
 class PromptReadService:
-    _list_subcategories_cache = TTLCache[Dict[str, Any]](default_ttl=10.0)
-    _retrieve_prompts_cache = TTLCache[Dict[str, Any]](default_ttl=10.0)
+    _list_subcategories_cache = TTLCache[Dict[str, Any]](default_ttl=30.0)
+    _retrieve_prompts_cache = TTLCache[Dict[str, Any]](default_ttl=30.0)
 
     def __init__(
         self,

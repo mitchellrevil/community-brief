@@ -28,6 +28,19 @@ security = HTTPBearer(auto_error=False)
 ACCESS_COOKIE_NAME = "access_token"
 _resolved_auth_user_cache = TTLCache[Dict[str, Any]](default_ttl=15.0)
 
+
+async def clear_resolved_auth_user_cache(token: str | None = None) -> None:
+    """Clear the shared resolved-user cache.
+
+    When a token is provided, only matching entries are removed. Otherwise the
+    entire cache is cleared. This is primarily useful for tests and cache
+    invalidation hooks.
+    """
+    if token is None:
+        await _resolved_auth_user_cache.clear()
+        return
+    await _resolved_auth_user_cache.invalidate(f"token:{token}")
+
 def get_app_config(request: Request) -> AppConfig:
     """Return the application configuration instance from app state."""
     return request.app.state.config
@@ -64,7 +77,9 @@ async def _resolve_current_user_from_token(
     if cached_user is not None:
         return cached_user
 
-    cache_key = f"{id(user_repository)}:{id(config)}:{token}"
+    # Token resolution only depends on the token itself; keeping the key token-only
+    # avoids accidental cache misses when request-scoped dependency objects differ.
+    cache_key = f"token:{token}"
     cached_user = await _resolved_auth_user_cache.get(cache_key)
     if cached_user is not None:
         request.state.current_user = copy.deepcopy(cached_user)

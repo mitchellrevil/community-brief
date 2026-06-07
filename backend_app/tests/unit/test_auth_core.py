@@ -12,7 +12,7 @@ from fastapi import HTTPException, Request
 from fastapi.security import HTTPAuthorizationCredentials
 from azure.cosmos.exceptions import CosmosHttpResponseError
 
-from app.core.auth import get_current_user, get_current_user_sse
+from app.core.auth import clear_resolved_auth_user_cache, get_current_user, get_current_user_sse
 
 
 # Mark all tests as unit tests
@@ -68,6 +68,13 @@ def mock_user_repository():
     service.create = AsyncMock()
     service.update = AsyncMock()
     return service
+
+
+@pytest.fixture(autouse=True)
+async def clear_auth_cache():
+    await clear_resolved_auth_user_cache()
+    yield
+    await clear_resolved_auth_user_cache()
 
 
 def create_user(

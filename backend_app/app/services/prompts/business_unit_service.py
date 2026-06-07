@@ -7,7 +7,7 @@ from ...utils.cache_utils import TTLCache
 
 logger = get_logger(__name__)
 
-_business_unit_list_cache = TTLCache[Dict[str, Any]](default_ttl=15.0)
+_business_unit_list_cache = TTLCache[Dict[str, Any]](default_ttl=60.0)
 
 
 class BusinessUnitService:

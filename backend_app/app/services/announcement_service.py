@@ -17,8 +17,8 @@ from ..utils.cache_utils import TTLCache
 
 logger = get_logger(__name__)
 
-_active_announcements_cache = TTLCache[List[Dict[str, Any]]](default_ttl=15.0)
-_announcement_by_id_cache = TTLCache[Dict[str, Any]](default_ttl=30.0)
+_active_announcements_cache = TTLCache[List[Dict[str, Any]]](default_ttl=30.0)
+_announcement_by_id_cache = TTLCache[Dict[str, Any]](default_ttl=60.0)
 
 
 class AnnouncementService(AnnouncementServiceInterface):

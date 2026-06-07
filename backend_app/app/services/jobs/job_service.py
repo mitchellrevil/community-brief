@@ -15,7 +15,7 @@ JOB_SERVICE_ERRORS = (RuntimeError, OSError, ValueError, TypeError)
 JOB_PROMPT_SETTINGS_ERRORS = (RuntimeError, ValueError, TypeError, KeyError)
 
 
-_job_cache = TTLCache(default_ttl=60.0)
+_job_cache = TTLCache(default_ttl=15.0)
 
 
 class JobService:
@@ -248,7 +248,6 @@ class JobService:
         # Persist to Cosmos (uses cosmos helper if available)
         try:
             created = await self.repository.create(job_doc)
-            await invalidate_job_cache(created["id"])
             # Enrich returned document with SAS tokens
             await self.enrich_job_file_urls(created)
             return created
@@ -303,7 +302,6 @@ class JobService:
 
         try:
             created = await self.repository.create(job_doc)
-            await invalidate_job_cache(created["id"])
             await self.enrich_job_file_urls(created)
             
             # Phase 2: Write job_id to blob metadata (idempotent, non-blocking)
@@ -353,6 +351,3 @@ async def invalidate_job_cache(job_id: str) -> None:
     management) can invalidate cached job data after writes.
     """
     await _job_cache.invalidate(f"job:{job_id}")
-    from .job_route_workflow_service import invalidate_job_list_cache
-
-    await invalidate_job_list_cache()
