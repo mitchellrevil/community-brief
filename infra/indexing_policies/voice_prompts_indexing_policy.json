@@ -1,0 +1,40 @@
+{
+  "indexingMode": "consistent",
+  "automatic": true,
+  "includedPaths": [
+    { "path": "/type/?" },
+    { "path": "/category_id/?" },
+    { "path": "/prompt_subcategory_id/?" },
+    { "path": "/name/?" },
+    { "path": "/order/?" },
+    { "path": "/is_active/?" },
+    { "path": "/created_at/?" },
+    { "path": "/*" }
+  ],
+  "excludedPaths": [
+    { "path": "/_etag/?" }
+  ],
+  "compositeIndexes": [
+    [
+      { "path": "/type", "order": "ascending" },
+      { "path": "/category_id", "order": "ascending" }
+    ],
+    [
+      { "path": "/type", "order": "ascending" },
+      { "path": "/prompt_subcategory_id", "order": "ascending" }
+    ],
+    [
+      { "path": "/type", "order": "ascending" },
+      { "path": "/is_active", "order": "ascending" }
+    ],
+    [
+      { "path": "/type", "order": "ascending" },
+      { "path": "/category_id", "order": "ascending" },
+      { "path": "/created_at", "order": "descending" }
+    ],
+    [
+      { "path": "/type", "order": "ascending" },
+      { "path": "/name", "order": "ascending" }
+    ]
+  ]
+}

@@ -1,0 +1,16 @@
+{  
+  "RoleName": "cosmos-voice-contributor-role",  
+  "Type": "BuiltInRole",  
+  "AssignableScopes": [  
+    "/subscriptions/<subscriptionid>/resourceGroups/<resourcegroupname>/providers/Microsoft.DocumentDB/databaseAccounts/<cosmosdbaccount>"
+  ],  
+  "Permissions": [  
+    {  
+      "DataActions": [  
+        "Microsoft.DocumentDB/databaseAccounts/readMetadata",  
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/*",  
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/*"  
+      ]  
+    }  
+  ]  
+}  

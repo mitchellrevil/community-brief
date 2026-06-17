@@ -1,0 +1,31 @@
+{
+  "indexingMode": "consistent",
+  "automatic": true,
+  "includedPaths": [
+    { "path": "/user_id/?" },
+    { "path": "/action/?" },
+    { "path": "/timestamp/?" },
+    { "path": "/resource_type/?" },
+    { "path": "/resource_id/?" },
+    { "path": "/severity/?" },
+    { "path": "/*" }
+  ],
+  "excludedPaths": [
+    { "path": "/_etag/?" }
+  ],
+  "compositeIndexes": [
+    [
+      { "path": "/user_id", "order": "ascending" },
+      { "path": "/timestamp", "order": "descending" }
+    ],
+    [
+      { "path": "/action", "order": "ascending" },
+      { "path": "/timestamp", "order": "descending" }
+    ],
+    [
+      { "path": "/resource_type", "order": "ascending" },
+      { "path": "/resource_id", "order": "ascending" },
+      { "path": "/timestamp", "order": "descending" }
+    ]
+  ]
+}

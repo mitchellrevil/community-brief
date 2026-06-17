@@ -1,0 +1,18 @@
+{
+  "indexingMode": "consistent",
+  "automatic": true,
+  "includedPaths": [
+    { "path": "/created_at/?" },
+    { "path": "/is_active/?" },
+    { "path": "/start_at/?" },
+    { "path": "/end_at/?" },
+    { "path": "/target_roles/?" },
+    { "path": "/target_service_areas/?" },
+    { "path": "/*" }
+  ],
+  "excludedPaths": [
+    { "path": "/_etag/?" },
+    { "path": "/body/*" },
+    { "path": "/attachments/*" }
+  ]
+}

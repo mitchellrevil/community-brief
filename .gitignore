@@ -1,0 +1,64 @@
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
+!**/.env.example
+!**/.env.sample
+local.settings.json
+!**/local.settings.json.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+dev-dist/
+coverage/
+playwright-report/
+test-results/
+frontend_app/dist/
+frontend_app/playwright-report/
+frontend_app/test-results/
+frontend_app/e2e/storageState*.json
+
+# Azure / deployment artifacts
+artifacts/
+.python_packages/
+bin/
+obj/
+*.zip
+
+# Terraform / infra local state
+infra/.terraform/
+infra/.terraform.lock.hcl
+infra/*.tfstate
+infra/*.tfstate.*
+infra/*.tfvars
+infra/*.tfvars.json
+infra/crash.log
+infra/crash.*.log
+
+# Logs and OS/editor files
+*.log
+logs/
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Certificates and keys
+*.pem
+*.key
+*.pfx

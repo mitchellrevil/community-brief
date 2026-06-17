@@ -1,0 +1,3 @@
+lazy-components.test.ts removed on 2026-03-05
+Original path: frontend_app/src/tests/components/lazy/lazy-components.test.ts
+Reason: removed per request to eliminate failing tests.

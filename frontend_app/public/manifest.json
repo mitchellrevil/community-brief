@@ -1,0 +1,56 @@
+{
+  "short_name": "Community Brief",
+  "name": "Community Brief",
+  "description": "AI-powered audio transcription and analysis platform",
+  "icons": [
+    {
+      "src": "favicon.ico",
+      "sizes": "64x64 32x32 24x24 16x16",
+      "type": "image/x-icon"
+    },
+    {
+      "src": "logo192.png",
+      "type": "image/png",
+      "sizes": "192x192",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "logo512.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/simple-upload",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#1f2937",
+  "background_color": "#ffffff",
+  "categories": ["productivity", "business"],
+  "shortcuts": [
+    {
+      "name": "Upload Recording",
+      "short_name": "Upload",
+      "description": "Upload and analyze a new recording",
+      "url": "/simple-upload",
+      "icons": [
+        {
+          "src": "logo192.png",
+          "sizes": "192x192"
+        }
+      ]
+    },
+    {
+      "name": "View Recordings",
+      "short_name": "Recordings",
+      "description": "View all audio recordings",
+      "url": "/audio-recordings",
+      "icons": [
+        {
+          "src": "logo192.png",
+          "sizes": "192x192"
+        }
+      ]
+    }
+  ]
+}

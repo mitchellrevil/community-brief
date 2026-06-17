@@ -1,0 +1,18 @@
+{  
+  "RoleName": "cosmos-voice-reader-role",  
+  "Type": "BuiltInRole",  
+  "AssignableScopes": [  
+    "/subscriptions/<subscriptionid>/resourceGroups/<resourcegroupname>/providers/Microsoft.DocumentDB/databaseAccounts/<cosmosdbaccount>"  
+  ],  
+  "Permissions": [  
+    {  
+      "DataActions": [  
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/read",  
+        "Microsoft.DocumentDB/databaseAccounts/readMetadata",  
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/executeQuery",  
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/readChangeFeed",  
+        "Microsoft.DocumentDB/databaseAccounts/sqlDatabases/containers/items/read"  
+      ]  
+    }  
+  ]  
+}  

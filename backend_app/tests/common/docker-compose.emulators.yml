@@ -1,0 +1,119 @@
+# Docker Compose configuration for running Azure emulators locally.
+#
+# This file sets up:
+# - Azurite (Azure Storage Emulator) - For blob storage testing
+# - Azure Cosmos DB Emulator (Linux version) - For database testing
+# - Redis (optional) - For caching testing
+#
+# Usage:
+#   docker-compose -f docker-compose.emulators.yml up -d
+#   pytest --run-emulators -m integration
+#   docker-compose -f docker-compose.emulators.yml down
+#
+# Note: The Cosmos DB Linux emulator requires Docker with Linux containers.
+# On Windows, ensure Docker Desktop is set to Linux containers mode.
+
+services:
+  # ============================================================================
+  # AZURITE - Azure Storage Emulator
+  # ============================================================================
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.31.0
+    container_name: community-brief-azurite
+    hostname: azurite
+    restart: unless-stopped
+    ports:
+      - "10000:10000"  # Blob service
+      - "10001:10001"  # Queue service
+      - "10002:10002"  # Table service
+    volumes:
+      - azurite_data:/data
+    command: "azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --location /data --debug /data/debug.log"
+    healthcheck:
+      test: ["CMD", "nc", "-z", "127.0.0.1", "10000"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    environment:
+      # Default well-known Azurite credentials (for local dev only)
+      # Account name: devstoreaccount1
+      # Account key: REDACTED
+      AZURITE_ACCOUNTS: "devstoreaccount1:REDACTED"
+
+  # ============================================================================
+  # COSMOS DB EMULATOR (Linux)
+  # ============================================================================
+  # Note: The Linux Cosmos emulator has some limitations compared to Windows.
+  # For full compatibility testing, consider using the Windows emulator or
+  # a dedicated test Cosmos DB account in Azure.
+  cosmos:
+    image: mcr.microsoft.com/cosmosdb/linux/azure-cosmos-emulator:latest
+    container_name: community-brief-cosmos
+    hostname: cosmos
+    restart: unless-stopped
+    ports:
+      - "8081:8081"      # HTTPS endpoint
+      - "10250:10250"    # Direct mode
+      - "10251:10251"    # Direct mode
+      - "10252:10252"    # Direct mode
+      - "10253:10253"    # Direct mode
+      - "10254:10254"    # Direct mode
+    environment:
+      - AZURE_COSMOS_EMULATOR_PARTITION_COUNT=10
+      - AZURE_COSMOS_EMULATOR_ENABLE_DATA_PERSISTENCE=true
+      - AZURE_COSMOS_EMULATOR_IP_ADDRESS_OVERRIDE=127.0.0.1
+    volumes:
+      - cosmos_data:/tmp/cosmos/appdata
+    healthcheck:
+      test: ["CMD-SHELL", "curl -k https://localhost:8081/_explorer/emulator.pem || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s  # Cosmos emulator takes a while to start
+    # Cosmos emulator requires significant resources
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          cpus: '1'
+          memory: 2G
+
+  # ============================================================================
+  # REDIS (Optional - for caching tests)
+  # ============================================================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: community-brief-redis
+    hostname: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    command: redis-server --appendonly yes
+
+# ============================================================================
+# VOLUMES
+# ============================================================================
+volumes:
+  azurite_data:
+    driver: local
+  cosmos_data:
+    driver: local
+  redis_data:
+    driver: local
+
+# ============================================================================
+# NETWORKS
+# ============================================================================
+networks:
+  default:
+    name: community-brief-test-network

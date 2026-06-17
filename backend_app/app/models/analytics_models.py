@@ -1,0 +1,170 @@
+from pydantic import BaseModel
+from typing import Dict, Any, List, Optional
+from datetime import datetime
+
+
+class AnalyticsEventRequest(BaseModel):
+    event_type: str
+    metadata: Optional[Dict[str, Any]] = None
+    job_id: Optional[str] = None
+
+
+class UserAnalyticsResponse(BaseModel):
+    user_id: str
+    period_days: int
+    start_date: str
+    end_date: str
+    analytics: Dict[str, Any]
+
+
+class SystemAnalyticsResponse(BaseModel):
+    period_days: int
+    start_date: str
+    end_date: str
+    analytics: Dict[str, Any]
+
+
+class TranscriptionStats(BaseModel):
+    total_minutes: float
+    total_jobs: int
+    average_job_duration: float
+
+
+class ActivityStats(BaseModel):
+    total_events: int
+    login_count: int
+    jobs_created: int
+    last_activity: Optional[str]
+
+
+class UsagePatterns(BaseModel):
+    most_active_hours: List[int]
+    most_used_transcription_method: Optional[str]
+    file_upload_count: int
+    text_input_count: int
+
+
+class UserAnalytics(BaseModel):
+    transcription_stats: TranscriptionStats
+    activity_stats: ActivityStats
+    usage_patterns: UsagePatterns
+
+
+class UserDetailsResponse(BaseModel):
+    id: str
+    email: str
+    full_name: Optional[str]
+    permission: str
+    source: str
+    microsoft_oid: Optional[str]
+    tenant_id: Optional[str]
+    created_at: str
+    last_login: Optional[str]
+    is_active: bool
+    permission_changed_at: str
+    permission_changed_by: str
+    permission_history: List[Dict[str, Any]]
+    updated_at: str
+    analytics: Optional[UserAnalytics] = None
+
+
+class ExportRequest(BaseModel):
+    format: str  # 'csv' or 'pdf'
+    filters: Optional[Dict[str, Any]] = None
+    date_range: Optional[Dict[str, str]] = None
+
+
+class ExportResponse(BaseModel):
+    status: str
+    message: str
+    download_url: Optional[str] = None
+    filename: Optional[str] = None
+
+
+class SystemHealthMetrics(BaseModel):
+    api_response_time_ms: float
+    database_response_time_ms: float
+    storage_response_time_ms: float
+    uptime_percentage: float
+    active_connections: int
+    memory_usage_percentage: float
+    disk_usage_percentage: float
+
+
+class SystemHealthResponse(BaseModel):
+    status: str
+    timestamp: str
+    metrics: SystemHealthMetrics
+    services: Dict[str, str]  # service_name: status
+
+
+class JobAnalyticsResponse(BaseModel):
+    jobs: List[Dict[str, Any]]
+    count: int
+
+
+class UserMinuteRecord(BaseModel):
+    job_id: str
+    timestamp: str
+    audio_duration_minutes: float
+    event_type: Optional[str] = None
+    file_name: Optional[str] = None
+    prompt_category_id: Optional[str] = None
+    prompt_subcategory_id: Optional[str] = None
+
+
+class UserMinutesResponse(BaseModel):
+    user_id: str
+    period_days: int
+    start_date: str
+    end_date: str
+    total_minutes: float
+    total_records: int
+    records: List[UserMinuteRecord]
+
+
+class SessionSummary(BaseModel):
+    total_sessions: int
+    active_sessions: int
+    expired_sessions: int
+    closed_sessions: int
+
+
+class SessionRecord(BaseModel):
+    id: str
+    user_id: str
+    user_email: Optional[str] = None
+    status: str
+    created_at: str
+    last_activity: Optional[str] = None
+    last_heartbeat: Optional[str] = None
+    ended_at: Optional[str] = None
+    end_reason: Optional[str] = None
+    ip_address: Optional[str] = None
+    ip_addresses: Optional[List[str]] = None
+    activity_count: Optional[int] = None
+    total_requests: Optional[int] = None
+    duration_minutes: Optional[float] = None
+
+
+class AdminSessionsResponse(BaseModel):
+    period_days: int
+    start_date: Optional[str]
+    end_date: Optional[str]
+    summary: SessionSummary
+    items: List[SessionRecord]
+    total: int
+    limit: int
+    offset: int
+
+
+class UserSessionsResponse(BaseModel):
+    user_id: str
+    period_days: int
+    start_date: Optional[str]
+    end_date: Optional[str]
+    summary: SessionSummary
+    items: List[SessionRecord]
+    total: int
+    limit: int
+    offset: int

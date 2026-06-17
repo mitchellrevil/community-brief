@@ -1,0 +1,55 @@
+# Core Framework
+fastapi==0.136.1
+uvicorn[standard]==0.47.0
+gunicorn==26.0.0
+python-multipart==0.0.28
+
+
+# Data Validation & Settings
+typing-extensions==4.15.0
+pydantic[email]==2.13.4
+pydantic-settings==2.14.1
+
+
+# Authentication & Security
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+PyJWT[crypto]==2.12.1  # [crypto] provides RSA/ECDSA support for Microsoft token validation
+cryptography==48.0.0  # Required for JWT signature verification
+bcrypt==5.0.0
+
+
+# Azure Integration
+azure-identity==1.25.3
+azure-core==1.41.0
+azure-cosmos==4.15.0
+azure-common==1.1.28
+azure-storage-blob==12.29.0
+aiofiles==25.1.0  # Async file I/O for uploads and temp files
+
+
+# AI & ML
+openai==2.36.0
+
+# HTTP & Networking
+httpx==0.28.1
+aiohttp==3.13.5  # Pin to 3.10+ for azure-cosmos async compatibility
+
+
+# Document Generation & Processing
+reportlab==4.5.1
+python-docx==1.2.0
+mutagen==1.47.0
+
+
+# System & Configuration
+python-dotenv==1.2.2
+structlog==25.5.0
+
+# Caching
+redis==7.4.0
+fastapi-limiter==0.1.6
+
+httptools==0.7.1
+#uvloop>=0.17.0  # Not supported on Windows
+
