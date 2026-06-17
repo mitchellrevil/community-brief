@@ -38,6 +38,7 @@ artifacts/
 bin/
 obj/
 *.zip
+infra/main.json
 
 # Terraform / infra local state
 infra/.terraform/

@@ -314,12 +314,12 @@ if (-not $SkipFrontend) {
 }
 
 if (-not $SkipHealthCheck) {
-    Write-Step "Checking backend health: https://$($names.WebAppHostname)/api/health"
+    Write-Step "Checking backend health: https://$($names.WebAppHostname)/health/ready"
     if ($DryRun) {
-        Write-Host "DRY RUN: would check https://$($names.WebAppHostname)/api/health"
+        Write-Host "DRY RUN: would check https://$($names.WebAppHostname)/health/ready"
     }
     else {
-        Invoke-WebRequest -Uri "https://$($names.WebAppHostname)/api/health" -UseBasicParsing -TimeoutSec 30 | Out-Null
+        Invoke-WebRequest -Uri "https://$($names.WebAppHostname)/health/ready" -UseBasicParsing -TimeoutSec 30 | Out-Null
     }
 }
 

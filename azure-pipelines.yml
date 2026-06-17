@@ -1,0 +1,228 @@
+trigger:
+  branches:
+    include:
+      - main
+
+pr:
+  branches:
+    include:
+      - main
+
+pool:
+  vmImage: ubuntu-latest
+
+parameters:
+  - name: environmentName
+    displayName: Deployment environment
+    type: string
+    default: dev
+    values:
+      - dev
+      - staging
+      - prod
+
+  - name: azureServiceConnection
+    displayName: Azure Resource Manager service connection
+    type: string
+    default: Azure-Subscription-Community
+
+  - name: azureLocation
+    displayName: Azure deployment location
+    type: string
+    default: uksouth
+
+variables:
+  pythonVersion: '3.11'
+  nodeVersion: '22.x'
+  frontendWorkingDir: frontend_app
+  environmentName: ${{ parameters.environmentName }}
+  azureLocation: ${{ parameters.azureLocation }}
+  resourceGroupName: rg-${{ parameters.environmentName }}-community-${{ parameters.azureLocation }}
+  deploymentName: community-${{ parameters.environmentName }}-$(Build.BuildId)
+
+  # Tenant-safe defaults. Override these in the pipeline or a variable group as needed.
+  VITE_API_URL: /api
+  VITE_BACKEND_DIRECT_URL: ''
+  VITE_ENABLE_HELP_PAGE: 'false'
+  VITE_HELP_DOCUMENTATION_URL: ''
+  VITE_SUPPORT_REQUEST_URL: ''
+
+stages:
+  - stage: Validate
+    displayName: Validate
+    jobs:
+      - job: Validate
+        displayName: Validate source and infrastructure
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: UsePythonVersion@0
+            displayName: Use Python $(pythonVersion)
+            inputs:
+              versionSpec: $(pythonVersion)
+
+          - task: UseNode@1
+            displayName: Use Node $(nodeVersion)
+            inputs:
+              version: $(nodeVersion)
+
+          - script: |
+              python -m compileall backend_app/app az-func-audio
+            displayName: Compile Python apps
+
+          - script: |
+              npm install --global corepack@latest
+              corepack enable
+              corepack prepare "$(node -p 'require("./$(frontendWorkingDir)/package.json").packageManager')" --activate
+              pnpm --version
+            displayName: Activate repo pnpm
+
+          - script: |
+              cd "$(frontendWorkingDir)"
+              pnpm install --frozen-lockfile
+              pnpm run type-check
+              pnpm run build
+            displayName: Check frontend
+            env:
+              CI: true
+              VITE_API_URL: /api
+              VITE_BACKEND_DIRECT_URL: ''
+              VITE_CLIENT_ID: 00000000-0000-0000-0000-000000000000
+              VITE_TENANT_ID: common
+              VITE_ENTRA_API_SCOPE: api://00000000-0000-0000-0000-000000000000/access_as_user
+              VITE_ENABLE_HELP_PAGE: 'false'
+              VITE_HELP_DOCUMENTATION_URL: ''
+              VITE_SUPPORT_REQUEST_URL: ''
+
+          - script: |
+              az bicep build --file infra/main.bicep
+            displayName: Build Bicep
+
+  - stage: DeployInfrastructure
+    displayName: Deploy infrastructure
+    dependsOn: Validate
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - deployment: Infrastructure
+        displayName: Bicep subscription deployment
+        environment: $(environmentName)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  fetchDepth: 1
+
+                - task: AzureCLI@2
+                  displayName: Deploy Bicep stack
+                  inputs:
+                    azureSubscription: ${{ parameters.azureServiceConnection }}
+                    scriptType: pscore
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      function Assert-RequiredEnvironmentVariable {
+                        param([Parameter(Mandatory = $true)][string[]]$Name)
+
+                        foreach ($item in $Name) {
+                          $value = [Environment]::GetEnvironmentVariable($item)
+                          if ([string]::IsNullOrWhiteSpace($value) -or $value.StartsWith('$(')) {
+                            throw "Pipeline variable '$item' must be defined before infrastructure deployment."
+                          }
+                        }
+                      }
+
+                      Assert-RequiredEnvironmentVariable -Name @(
+                        'JWT_SECRET_KEY',
+                        'MICROSOFT_CLIENT_ID',
+                        'MICROSOFT_TENANT_ID'
+                      )
+
+                      az deployment sub create `
+                        --name "$(deploymentName)" `
+                        --location "$(azureLocation)" `
+                        --template-file infra/main.bicep `
+                        --parameters "infra/main.$(environmentName).bicepparam" `
+                        --only-show-errors
+                  env:
+                    JWT_SECRET_KEY: $(JWT_SECRET_KEY)
+                    MICROSOFT_CLIENT_ID: $(MICROSOFT_CLIENT_ID)
+                    MICROSOFT_TENANT_ID: $(MICROSOFT_TENANT_ID)
+
+  - stage: DeployApps
+    displayName: Deploy application code
+    dependsOn: DeployInfrastructure
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - deployment: Applications
+        displayName: App Service, Functions, and Static Web App
+        environment: $(environmentName)
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - checkout: self
+                  fetchDepth: 1
+
+                - task: UsePythonVersion@0
+                  displayName: Use Python $(pythonVersion)
+                  inputs:
+                    versionSpec: $(pythonVersion)
+
+                - task: UseNode@1
+                  displayName: Use Node $(nodeVersion)
+                  inputs:
+                    version: $(nodeVersion)
+
+                - script: |
+                    npm install --global corepack@latest
+                    corepack enable
+                    corepack prepare "$(node -p 'require("./$(frontendWorkingDir)/package.json").packageManager')" --activate
+                    pnpm --version
+                  displayName: Activate repo pnpm
+
+                - task: AzureCLI@2
+                  displayName: Package and deploy apps
+                  inputs:
+                    azureSubscription: ${{ parameters.azureServiceConnection }}
+                    scriptType: pscore
+                    scriptLocation: inlineScript
+                    inlineScript: |
+                      function Assert-RequiredEnvironmentVariable {
+                        param([Parameter(Mandatory = $true)][string[]]$Name)
+
+                        foreach ($item in $Name) {
+                          $value = [Environment]::GetEnvironmentVariable($item)
+                          if ([string]::IsNullOrWhiteSpace($value) -or $value.StartsWith('$(')) {
+                            throw "Pipeline variable '$item' must be defined before application deployment."
+                          }
+                        }
+                      }
+
+                      Assert-RequiredEnvironmentVariable -Name @(
+                        'VITE_CLIENT_ID',
+                        'VITE_TENANT_ID',
+                        'VITE_ENTRA_API_SCOPE'
+                      )
+
+                      $tokenArgs = @()
+                      $token = [Environment]::GetEnvironmentVariable('STATIC_WEB_APP_DEPLOYMENT_TOKEN')
+                      if (-not [string]::IsNullOrWhiteSpace($token) -and -not $token.StartsWith('$(')) {
+                        $tokenArgs = @('-StaticWebAppDeploymentToken', $token)
+                      }
+
+                      & ./infra/deploy-apps.ps1 `
+                        -ResourceGroupName "$(resourceGroupName)" `
+                        -Environment "$(environmentName)" `
+                        -Location "$(azureLocation)" `
+                        @tokenArgs
+                  env:
+                    VITE_API_URL: $(VITE_API_URL)
+                    VITE_BACKEND_DIRECT_URL: $(VITE_BACKEND_DIRECT_URL)
+                    VITE_CLIENT_ID: $(VITE_CLIENT_ID)
+                    VITE_TENANT_ID: $(VITE_TENANT_ID)
+                    VITE_ENTRA_API_SCOPE: $(VITE_ENTRA_API_SCOPE)
+                    VITE_ENABLE_HELP_PAGE: $(VITE_ENABLE_HELP_PAGE)
+                    VITE_HELP_DOCUMENTATION_URL: $(VITE_HELP_DOCUMENTATION_URL)
+                    VITE_SUPPORT_REQUEST_URL: $(VITE_SUPPORT_REQUEST_URL)
+                    STATIC_WEB_APP_DEPLOYMENT_TOKEN: $(STATIC_WEB_APP_DEPLOYMENT_TOKEN)
