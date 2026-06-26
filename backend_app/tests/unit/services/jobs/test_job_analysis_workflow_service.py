@@ -82,14 +82,24 @@ async def test_reprocess_job_analysis_delegates_to_service_when_authorized(monke
 
     result = await workflow.reprocess_job_analysis(
         job_id="j1",
-        request=ReprocessRequest(instructions="Use the new prompt"),
+        request=ReprocessRequest(
+            instructions="Use the new prompt",
+            prompt_category_id="cat-2",
+            prompt_subcategory_id="sub-2",
+            create_new_job=True,
+        ),
         current_user={"id": "u1"},
     )
 
     assert result == {"status": "success"}
     reprocess_service.reprocess_job_analysis.assert_awaited_once_with(
         job_id="j1",
-        request_payload={"instructions": "Use the new prompt", "create_new_job": False},
+        request_payload={
+            "instructions": "Use the new prompt",
+            "prompt_category_id": "cat-2",
+            "prompt_subcategory_id": "sub-2",
+            "create_new_job": True,
+        },
         job={"id": "j1", "displayname": "Board sync"},
         current_user={"id": "u1"},
     )
