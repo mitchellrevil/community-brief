@@ -17,7 +17,11 @@ async def test_stream_analysis_chat_delegates_to_workflow():
         "j1",
         message="hi",
         conversation_history=[],
+        messages=None,
         max_tokens=100,
+        thread_id=None,
+        run_id=None,
+        state=None,
         current_user=current_user,
         workflow_service=workflow,
     )
@@ -29,6 +33,10 @@ async def test_stream_analysis_chat_delegates_to_workflow():
         conversation_history=[],
         max_tokens=100,
         current_user=current_user,
+        ag_ui_messages=None,
+        thread_id=None,
+        run_id=None,
+        state=None,
     )
 
 

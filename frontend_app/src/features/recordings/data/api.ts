@@ -883,14 +883,21 @@ export function streamChatResponse(
   conversationHistory: Array<any> = [],
   maxTokens: number = 2000
 ): Promise<Response> {
+  const messages = [
+    ...conversationHistory
+      .filter((item) => item?.role && item?.content)
+      .map((item) => ({ role: item.role, content: item.content })),
+    { role: 'user', content: message },
+  ];
+
   return streamWithAuth(CHAT_ENDPOINTS.streamChat(jobId), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      message,
-      conversation_history: conversationHistory,
+      thread_id: jobId,
+      messages,
       max_tokens: maxTokens,
     }),
   });

@@ -1,7 +1,11 @@
+import json
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+from agent_framework import AgentResponseUpdate, Content, ResponseStream
+
+from app.core.errors.domain import PermissionError
 from app.services.jobs.job_analysis_chat_service import JobAnalysisChatService
 
 
@@ -10,6 +14,7 @@ def chat_history_service():
     service = MagicMock()
     service.get_job = AsyncMock()
     service.store_response_id = AsyncMock()
+    service.update_analysis_text = AsyncMock()
     return service
 
 
@@ -18,28 +23,47 @@ def storage_service():
     service = MagicMock()
     service.download_text_from_blob = AsyncMock()
     service.download_docx_text_from_blob = AsyncMock()
+    service.upload_text_to_blob = AsyncMock()
     return service
+
+
+class FakeAgent:
+    default_options = {}
+
+    def __init__(self):
+        self.messages = []
+        self.kwargs = {}
+
+    def run(self, messages, stream=False, **kwargs):
+        self.messages = messages
+        self.kwargs = kwargs
+
+        async def gen():
+            yield AgentResponseUpdate(contents=[Content.from_text("chunk1")], response_id="resp-123")
+            yield AgentResponseUpdate(contents=[Content.from_text("chunk2")], response_id="resp-123")
+
+        return ResponseStream(gen())
 
 
 class ChatStub:
     def __init__(self):
-        self.system_prompt = "original"
         self.calls = []
+        self.agent = FakeAgent()
 
-    async def chat_stream(self, **kwargs):
-        kwargs["system_prompt"] = self.system_prompt
+    def build_agent(self, **kwargs):
         self.calls.append(kwargs)
-        on_response_id = kwargs.get("on_response_id")
-        if on_response_id:
-            on_response_id("resp-123")
-        yield "chunk1"
-        yield "chunk2"
+        return self.agent
+
+
+def _events(chunks):
+    return [json.loads(chunk.removeprefix("data: ").strip()) for chunk in chunks]
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_response_loads_context_and_stores_response_id(chat_history_service, storage_service):
+async def test_stream_chat_response_loads_context_and_emits_ag_ui_events(chat_history_service, storage_service):
     job = {
         "id": "j1",
+        "user_id": "u1",
         "text_content": "hello world",
         "analysis_file_path": "analysis.md",
     }
@@ -59,70 +83,67 @@ async def test_stream_chat_response_loads_context_and_stores_response_id(chat_hi
         )
     ]
 
-    assert chunks == ["data: chunk1\n\n", "data: chunk2\n\n", "data: [DONE]\n\n"]
-    assert "TRANSCRIPTION:\nhello world" in chatbot.calls[0]["system_prompt"]
-    assert "ANALYSIS:\nanalysis content" in chatbot.calls[0]["system_prompt"]
-    assert chatbot.system_prompt == "original"
-    chat_history_service.store_response_id.assert_awaited_once_with("j1", "resp-123")
+    events = _events(chunks)
+    assert [event["delta"] for event in events if event["type"] == "TEXT_MESSAGE_CONTENT"] == ["chunk1", "chunk2"]
+    assert events[0]["type"] == "RUN_STARTED"
+    assert events[-1]["type"] == "RUN_FINISHED"
+    assert "TRANSCRIPTION:\nhello world" in chatbot.calls[0]["instructions"]
+    assert "ANALYSIS:\nanalysis content" in chatbot.calls[0]["instructions"]
+    assert chatbot.calls[0]["max_tokens"] == 100
+    assert len(chatbot.calls[0]["tools"]) == 3
+    chat_history_service.store_response_id.assert_not_called()
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_response_uses_history_only_without_previous_response(chat_history_service, storage_service):
-    chat_history_service.get_job.return_value = {"id": "j1", "chat_response_id": None}
+async def test_stream_chat_response_converts_legacy_history_to_ag_ui_messages(chat_history_service, storage_service):
+    chat_history_service.get_job.return_value = {"id": "j1", "user_id": "u1"}
     chatbot = ChatStub()
     service = JobAnalysisChatService(chatbot, chat_history_service, storage_service)
-    message = MagicMock(role="user", content="previous")
+    previous = MagicMock(role="user", content="previous")
 
-    chunks = [
+    [
         chunk
         async for chunk in service.stream_chat_response(
             job_id="j1",
             message="next",
-            conversation_history=[message],
+            conversation_history=[previous],
             max_tokens=100,
             current_user={"id": "u1"},
         )
     ]
 
-    assert chunks[-1] == "data: [DONE]\n\n"
-    assert chatbot.calls[0]["conversation_history"] == [{"role": "user", "content": "previous"}]
+    assert [(message.role, message.text) for message in chatbot.agent.messages] == [
+        ("user", "previous"),
+        ("user", "next"),
+    ]
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_response_omits_history_when_chaining(chat_history_service, storage_service):
-    chat_history_service.get_job.return_value = {"id": "j1", "chat_response_id": "resp-old"}
+async def test_stream_chat_response_prefers_ag_ui_messages(chat_history_service, storage_service):
+    chat_history_service.get_job.return_value = {"id": "j1", "user_id": "u1"}
     chatbot = ChatStub()
     service = JobAnalysisChatService(chatbot, chat_history_service, storage_service)
-    message = MagicMock(role="user", content="previous")
+    previous = MagicMock(role="user", content="legacy")
 
-    chunks = [
+    [
         chunk
         async for chunk in service.stream_chat_response(
             job_id="j1",
-            message="next",
-            conversation_history=[message],
+            message="legacy next",
+            conversation_history=[previous],
             max_tokens=100,
             current_user={"id": "u1"},
+            ag_ui_messages=[{"role": "user", "content": "ag-ui"}],
         )
     ]
 
-    assert chunks[-1] == "data: [DONE]\n\n"
-    assert chatbot.calls[0]["conversation_history"] == []
-    assert chatbot.calls[0]["previous_response_id"] == "resp-old"
+    assert [(message.role, message.text) for message in chatbot.agent.messages] == [("user", "ag-ui")]
 
 
 @pytest.mark.asyncio
-async def test_stream_chat_response_yields_error_chunk(chat_history_service, storage_service):
-    chat_history_service.get_job.return_value = {"id": "j1"}
-
-    class FailingChatStub:
-        system_prompt = "original"
-
-        async def chat_stream(self, **kwargs):
-            raise RuntimeError("boom")
-            yield
-
-    chatbot = FailingChatStub()
+async def test_stream_chat_response_emits_ag_ui_error_when_user_cannot_view(chat_history_service, storage_service):
+    chat_history_service.get_job.return_value = {"id": "j1", "user_id": "owner"}
+    chatbot = ChatStub()
     service = JobAnalysisChatService(chatbot, chat_history_service, storage_service)
 
     chunks = [
@@ -133,8 +154,83 @@ async def test_stream_chat_response_yields_error_chunk(chat_history_service, sto
             conversation_history=[],
             max_tokens=100,
             current_user={"id": "u1"},
+            thread_id="thread-1",
+            run_id="run-1",
         )
     ]
 
-    assert chunks == ["data: [ERROR] boom\n\n"]
-    assert chatbot.system_prompt == "original"
+    assert _events(chunks) == [
+        {
+            "type": "RUN_ERROR",
+            "threadId": "thread-1",
+            "runId": "run-1",
+            "message": "Access denied to job",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_apply_analysis_patch_updates_markdown_when_edit_allowed(chat_history_service, storage_service):
+    chat_history_service.get_job.return_value = {
+        "id": "j1",
+        "user_id": "owner",
+        "analysis_file_path": "https://storage.blob.core.windows.net/jobs/analysis.md?sig=1",
+    }
+    storage_service.download_text_from_blob.return_value = "A old B old"
+    service = JobAnalysisChatService(ChatStub(), chat_history_service, storage_service)
+
+    result = await service.apply_analysis_patch(
+        job_id="j1",
+        current_user={"id": "owner"},
+        old_text="old",
+        new_text="new",
+    )
+
+    assert result["status"] == "applied"
+    storage_service.upload_text_to_blob.assert_awaited_once_with(
+        "https://storage.blob.core.windows.net/jobs/analysis.md?sig=1",
+        "A new B old",
+        content_type="text/markdown; charset=utf-8",
+    )
+    chat_history_service.update_analysis_text.assert_awaited_once_with("j1", "A new B old")
+
+
+@pytest.mark.asyncio
+async def test_apply_analysis_patch_requires_edit_permission(chat_history_service, storage_service):
+    chat_history_service.get_job.return_value = {
+        "id": "j1",
+        "user_id": "owner",
+        "analysis_file_path": "https://storage.blob.core.windows.net/jobs/analysis.md",
+        "shared_with": [{"user_id": "u2", "permission_level": "view"}],
+    }
+    service = JobAnalysisChatService(ChatStub(), chat_history_service, storage_service)
+
+    with pytest.raises(PermissionError):
+        await service.apply_analysis_patch(
+            job_id="j1",
+            current_user={"id": "u2"},
+            old_text="old",
+            new_text="new",
+        )
+
+    storage_service.upload_text_to_blob.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_apply_analysis_patch_gracefully_skips_non_markdown_analysis(chat_history_service, storage_service):
+    chat_history_service.get_job.return_value = {
+        "id": "j1",
+        "user_id": "owner",
+        "analysis_file_path": "https://storage.blob.core.windows.net/jobs/analysis.docx",
+    }
+    service = JobAnalysisChatService(ChatStub(), chat_history_service, storage_service)
+
+    result = await service.apply_analysis_patch(
+        job_id="j1",
+        current_user={"id": "owner"},
+        old_text="old",
+        new_text="new",
+    )
+
+    assert result["status"] == "unsupported"
+    storage_service.upload_text_to_blob.assert_not_called()

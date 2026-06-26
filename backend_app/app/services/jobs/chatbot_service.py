@@ -3,7 +3,7 @@ ChatBot service for Azure OpenAI chat interactions with streaming support.
 Uses the Azure OpenAI Responses API for chat interactions.
 """
 
-from typing import AsyncGenerator, Callable
+from typing import Any, AsyncGenerator, Callable, Sequence
 
 from openai import AsyncOpenAI, APIError, OpenAIError
 
@@ -100,6 +100,39 @@ class ChatBotService:
         self.model_deployment_name = model_deployment_name
         self.system_prompt = (
             "You are a helpful AI assistant. Be concise, clear, and helpful in your responses."
+        )
+
+    def build_agent(
+        self,
+        *,
+        instructions: str,
+        tools: Sequence[Any] | None = None,
+        max_tokens: int = 1000,
+    ) -> Any:
+        """Build a Microsoft Agent Framework agent using the existing OpenAI client."""
+        try:
+            from agent_framework import Agent
+            from agent_framework.openai import OpenAIResponsesClient
+        except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - runtime dependency guard
+            raise RuntimeError(
+                "Microsoft Agent Framework chat requires agent-framework-core, "
+                "agent-framework-openai, and agent-framework-ag-ui."
+            ) from exc
+
+        options: dict[str, Any] = {"max_tokens": max_tokens}
+        if self._should_set_temperature():
+            options["temperature"] = 0.7
+
+        client = OpenAIResponsesClient(
+            model_id=self.model_deployment_name,
+            async_client=self.client,
+        )
+        return Agent(
+            client,
+            name="SonicBriefJobAnalysis",
+            instructions=instructions,
+            tools=list(tools or []),
+            default_options=options,
         )
 
     def _build_input(

@@ -21,17 +21,21 @@ router = APIRouter(
 @router.post("/{job_id}/chat/stream")
 async def stream_analysis_chat(
     job_id: str,
-    message: str = Body(..., min_length=1, max_length=4000, description="User message"),
-    conversation_history: list[ChatMessage] = Body(
-        default_factory=list,
+    message: str | None = Body(None, min_length=1, max_length=4000, description="User message"),
+    conversation_history: list[ChatMessage] | None = Body(
+        default=None,
         description="Previous messages in conversation",
     ),
+    messages: list[dict[str, Any]] | None = Body(None, description="AG-UI messages"),
     max_tokens: int = Body(
         default=1000,
         ge=100,
         le=4000,
         description="Maximum tokens in response",
     ),
+    thread_id: str | None = Body(None, description="AG-UI thread id"),
+    run_id: str | None = Body(None, description="AG-UI run id"),
+    state: dict[str, Any] | None = Body(None, description="AG-UI state"),
     current_user: dict[str, Any] = Depends(get_current_user),
     workflow_service: JobAnalysisWorkflowService = Depends(get_job_analysis_workflow_service),
 ) -> StreamingResponse:
@@ -41,6 +45,10 @@ async def stream_analysis_chat(
         conversation_history=conversation_history,
         max_tokens=max_tokens,
         current_user=current_user,
+        ag_ui_messages=messages,
+        thread_id=thread_id,
+        run_id=run_id,
+        state=state,
     )
 
 

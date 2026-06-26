@@ -38,6 +38,10 @@ async def test_stream_analysis_chat_returns_streaming_response():
         conversation_history=[],
         max_tokens=100,
         current_user={"id": "u1"},
+        ag_ui_messages=None,
+        thread_id=None,
+        run_id=None,
+        state=None,
     )
 
     assert isinstance(response, StreamingResponse)

@@ -115,8 +115,7 @@ export function useChatInterface({ jobId }: UseChatInterfaceOptions): UseChatInt
     setIsLoading(true);
 
     try {
-      // Send conversation history - backend uses it only for first message when no response ID exists
-      // After that, the Responses API maintains conversation state via previous_response_id
+      // Send the prior panel messages plus the new user message as AG-UI input.
       const response = await streamChatResponse(jobId, userMessage, messages, 2000);
 
       if (!response.ok) {
@@ -134,6 +133,27 @@ export function useChatInterface({ jobId }: UseChatInterfaceOptions): UseChatInt
       let buffer = '';
       let lastUpdateTime = Date.now();
       const UPDATE_INTERVAL = 100;
+      const appendAssistantDelta = (delta: string) => {
+        if (!delta) return;
+        assistantMessage += delta;
+
+        const now = Date.now();
+        const shouldUpdate = now - lastUpdateTime > UPDATE_INTERVAL || assistantMessage.length % 50 === 0;
+
+        if (shouldUpdate) {
+          lastUpdateTime = now;
+          setMessages((prev) => {
+            const newMsgs = [...prev];
+            const lastMsg = newMsgs[newMsgs.length - 1];
+            if (lastMsg.role === 'assistant') {
+              lastMsg.content = assistantMessage;
+            } else {
+              newMsgs.push({ role: 'assistant', content: assistantMessage });
+            }
+            return newMsgs;
+          });
+        }
+      };
 
       let isDone = false;
       while (!isDone) {
@@ -145,6 +165,8 @@ export function useChatInterface({ jobId }: UseChatInterfaceOptions): UseChatInt
               const lastMsg = newMsgs[newMsgs.length - 1];
               if (lastMsg.role === 'assistant') {
                 lastMsg.content = assistantMessage;
+              } else {
+                newMsgs.push({ role: 'assistant', content: assistantMessage });
               }
               return newMsgs;
             });
@@ -175,23 +197,15 @@ export function useChatInterface({ jobId }: UseChatInterfaceOptions): UseChatInt
             continue;
           }
 
-          assistantMessage += data;
-
-          const now = Date.now();
-          const shouldUpdate = now - lastUpdateTime > UPDATE_INTERVAL || assistantMessage.length % 50 === 0;
-          
-          if (shouldUpdate) {
-            lastUpdateTime = now;
-            setMessages((prev) => {
-              const newMsgs = [...prev];
-              const lastMsg = newMsgs[newMsgs.length - 1];
-              if (lastMsg.role === 'assistant') {
-                lastMsg.content = assistantMessage;
-              } else {
-                newMsgs.push({ role: 'assistant', content: assistantMessage });
-              }
-              return newMsgs;
-            });
+          try {
+            const event = JSON.parse(data);
+            if (event.type === 'TEXT_MESSAGE_CONTENT') {
+              appendAssistantDelta(event.delta || '');
+            } else if (event.type === 'RUN_ERROR') {
+              setError(event.message || 'Chat stream failed');
+            }
+          } catch {
+            appendAssistantDelta(data);
           }
         }
       }

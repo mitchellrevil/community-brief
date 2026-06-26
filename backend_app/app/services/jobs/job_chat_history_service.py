@@ -46,3 +46,8 @@ class JobChatHistoryService:
         job = await self.get_job(job_id)
         job["chat_response_id"] = response_id
         await self.repository.replace(job_id, job)
+
+    async def update_analysis_text(self, job_id: str, analysis_text: str) -> None:
+        job = await self.get_job(job_id)
+        job["analysis_text"] = analysis_text
+        await self.repository.replace(job_id, job)

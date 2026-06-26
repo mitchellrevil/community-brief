@@ -3,7 +3,7 @@ import asyncio
 import inspect
 from typing import Optional, AsyncGenerator
 from azure.storage.blob.aio import BlobServiceClient, BlobClient
-from azure.storage.blob import BlobSasPermissions, generate_blob_sas
+from azure.storage.blob import BlobSasPermissions, ContentSettings, generate_blob_sas
 from azure.identity.aio import DefaultAzureCredential
 from azure.core.exceptions import AzureError
 from datetime import UTC, datetime, timedelta
@@ -503,23 +503,54 @@ class StorageService:
             )
             return None
 
-    async def upload_text_to_blob(self, blob_url: str, text_content: str) -> str:
-        """Overwrite an existing blob URL with UTF-8 text content."""
+    async def upload_text_to_blob(
+        self,
+        blob_url: str,
+        text_content: str,
+        *,
+        content_type: str = "text/plain; charset=utf-8",
+    ) -> str:
+        """Replace an existing blob with UTF-8 text content."""
         if not blob_url:
             raise ValueError("Blob URL cannot be empty")
 
-        parsed_url = urlparse(blob_url)
-        path_parts = parsed_url.path.strip("/").split("/")
-        if len(path_parts) < 2:
-            raise ValueError(f"Invalid blob URL format: {blob_url}")
+        try:
+            parsed_url = urlparse(blob_url)
+            path_parts = parsed_url.path.strip("/").split("/")
 
-        container_name = path_parts[0]
-        blob_name = "/".join(path_parts[1:])
-        container_client = self.blob_service_client.get_container_client(container_name)
-        blob_client = container_client.get_blob_client(blob_name)
+            if len(path_parts) < 2:
+                self.logger.error("blob_url_invalid", blob_url=blob_url)
+                raise ValueError(f"Invalid blob URL format: {blob_url}")
 
-        await blob_client.upload_blob(text_content.encode("utf-8"), overwrite=True)
-        return blob_client.url
+            container_name = path_parts[0]
+            blob_name = "/".join(path_parts[1:])
+
+            container_client = self.blob_service_client.get_container_client(container_name)
+            blob_client = container_client.get_blob_client(blob_name)
+            payload = text_content.encode("utf-8")
+
+            await blob_client.upload_blob(
+                payload,
+                overwrite=True,
+                content_settings=ContentSettings(content_type=content_type),
+            )
+
+            self.logger.info(
+                "blob_text_upload_succeeded",
+                blob_url=blob_url[:80],
+                size_bytes=len(payload),
+            )
+            return blob_client.url
+
+        except BLOB_SERVICE_ERRORS as e:
+            self.logger.error(
+                "blob_text_upload_failed",
+                blob_url=blob_url[:80],
+                error=str(e),
+                error_type=type(e).__name__,
+                exc_info=True,
+            )
+            raise
 
     async def download_docx_text_from_blob(self, blob_url: str) -> Optional[str]:
         """Download .docx file from blob and extract text content.
@@ -645,11 +676,12 @@ class StorageService:
             )
             raise
 
-    async def generate_docx_bytes(self, analysis_text: str, add_title: bool = True) -> bytes:
-        """Generate a DOCX from analysis text and return the bytes.
+    async def generate_and_upload_docx(self, analysis_text: str, blob_name: str, add_title: bool = True) -> str:
+        """Generate a DOCX from analysis text and upload to blob storage. Return the blob URL.
         
         Args:
             analysis_text: The text content to convert to DOCX
+            blob_name: The name/path for the blob in storage
             add_title: Whether to add "Analysis Report" title at the top (True for new, False for edited)
         """
         try:
@@ -733,20 +765,8 @@ class StorageService:
                 return buffer.getvalue()
 
             docx_content = await asyncio.to_thread(_generate_docx)
-            return docx_content
 
-        except BLOB_SERVICE_ERRORS as e:
-            self.logger.error(
-                "blob_docx_generate_failed",
-                error=str(e),
-                error_type=type(e).__name__,
-            )
-            raise
-
-    async def generate_and_upload_docx(self, analysis_text: str, blob_name: str, add_title: bool = True) -> str:
-        """Generate a DOCX from analysis text and upload to blob storage. Return the blob URL."""
-        try:
-            docx_content = await self.generate_docx_bytes(analysis_text, add_title=add_title)
+            # Upload DOCX
             container_client = self.blob_service_client.get_container_client(
                 self.config.azure_storage_recordings_container
             )
