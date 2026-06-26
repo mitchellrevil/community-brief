@@ -16,6 +16,7 @@ import {
   getSharedJobs,
   refineAnalysis,
   reprocessJob,
+  updateTranscriptionSpeakerNames,
 } from "@/features/recordings/data/api";
 import { recordingsKeys } from "@/features/recordings/data/keys";
 
@@ -216,6 +217,25 @@ export function useReprocessJobMutation() {
           context.previousJob,
         );
       }
+    },
+  });
+}
+
+export function useUpdateTranscriptionSpeakerNamesMutation() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      jobId,
+      speakerNames,
+    }: {
+      jobId: string;
+      speakerNames: Record<string, string>;
+    }) => updateTranscriptionSpeakerNames(jobId, speakerNames),
+    onSuccess: (data, variables) => {
+      queryClient.setQueryData(recordingsKeys.transcription(variables.jobId), data.transcription);
+      queryClient.invalidateQueries({ queryKey: recordingsKeys.single(variables.jobId) });
+      queryClient.invalidateQueries({ queryKey: recordingsKeys.base() });
     },
   });
 }

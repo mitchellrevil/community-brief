@@ -503,6 +503,24 @@ class StorageService:
             )
             return None
 
+    async def upload_text_to_blob(self, blob_url: str, text_content: str) -> str:
+        """Overwrite an existing blob URL with UTF-8 text content."""
+        if not blob_url:
+            raise ValueError("Blob URL cannot be empty")
+
+        parsed_url = urlparse(blob_url)
+        path_parts = parsed_url.path.strip("/").split("/")
+        if len(path_parts) < 2:
+            raise ValueError(f"Invalid blob URL format: {blob_url}")
+
+        container_name = path_parts[0]
+        blob_name = "/".join(path_parts[1:])
+        container_client = self.blob_service_client.get_container_client(container_name)
+        blob_client = container_client.get_blob_client(blob_name)
+
+        await blob_client.upload_blob(text_content.encode("utf-8"), overwrite=True)
+        return blob_client.url
+
     async def download_docx_text_from_blob(self, blob_url: str) -> Optional[str]:
         """Download .docx file from blob and extract text content.
         

@@ -104,6 +104,7 @@ export const ContentTabs = memo(function ContentTabsView({
                   exit="exit"
                 >
                   <TranscriptionTab
+                    jobId={jobId}
                     transcriptionText={transcriptionText}
                     isProcessing={isTranscriptionProcessing}
                     shouldShowError={shouldShowTranscriptionError}

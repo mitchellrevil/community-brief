@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import MagicMock, AsyncMock
-from app.services.jobs.job_service import JobService, invalidate_job_cache, _job_cache
+from app.services.jobs.job_service import JobService, invalidate_job_cache, rewrite_transcription_speaker_names, _job_cache
 from app.services.jobs.job_route_workflow_service import _jobs_cache
 from app.repositories.jobs import JobRepository
 from app.services.storage.blob_service import StorageService
@@ -10,6 +10,8 @@ from app.core.config import AppConfig
 def mock_storage():
     storage = MagicMock(spec=StorageService)
     storage.add_sas_token_to_url = AsyncMock(side_effect=lambda url: f"{url}?sas" if url else None)
+    storage.download_text_from_blob = AsyncMock()
+    storage.upload_text_to_blob = AsyncMock()
     return storage
 
 @pytest.fixture
@@ -18,6 +20,7 @@ def mock_job_repository():
     repository.get_by_id = AsyncMock()
     repository.query = AsyncMock()
     repository.create = AsyncMock()
+    repository.replace = AsyncMock()
     return repository
 
 @pytest.fixture
@@ -154,6 +157,46 @@ class TestEnrichment:
         enriched = await job_service.enrich_job_file_urls(job)
         assert enriched["file_name"] == "file.wav"
         assert enriched["displayname"] == "file.wav"
+
+
+@pytest.mark.asyncio
+class TestTranscriptionSpeakerNames:
+    async def test_rewrite_transcription_speaker_names_preserves_old_format_and_named_headers(self):
+        text = (
+            "--- Speaker 1 @ 00:00:00.120 ---\n"
+            "  [00:00:00.120] Hello\n"
+            "--- Speaker 2: Bob @ 00:00:05.000 ---\n"
+            "  [00:00:05.000] Hi\n"
+        )
+
+        result = rewrite_transcription_speaker_names(text, {"1": "Jane Smith", "2": ""})
+
+        assert "--- Speaker 1: Jane Smith @ 00:00:00.120 ---" in result
+        assert "--- Speaker 2 @ 00:00:05.000 ---" in result
+        assert "[00:00:05.000] Hi" in result
+
+    async def test_update_transcription_speaker_names_rewrites_blob_and_text_content(
+        self,
+        job_service,
+        mock_storage,
+        mock_job_repository,
+    ):
+        job = {
+            "id": "job-1",
+            "type": "job",
+            "text_content": "--- Speaker 1 @ 00:00:00.120 ---\n  [00:00:00.120] Hello\n",
+            "transcription_file_path": "https://storage.blob.core.windows.net/uploads/transcription.txt",
+        }
+        mock_storage.upload_text_to_blob.return_value = job["transcription_file_path"]
+        mock_job_repository.replace.side_effect = lambda job_id, doc: doc
+
+        updated = await job_service.update_transcription_speaker_names(job, {"1": "Jane Smith"})
+
+        assert "--- Speaker 1: Jane Smith @ 00:00:00.120 ---" in updated
+        mock_storage.upload_text_to_blob.assert_awaited_once_with(job["transcription_file_path"], updated)
+        mock_job_repository.replace.assert_awaited_once()
+        replaced_job = mock_job_repository.replace.call_args.args[1]
+        assert replaced_job["text_content"] == updated
 
 @pytest.mark.asyncio
 class TestUploadAndCreate:

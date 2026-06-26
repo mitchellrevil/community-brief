@@ -2,6 +2,7 @@ from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
 from datetime import UTC, datetime
 import asyncio
+import re
 from ...core.logging import get_logger
 from ...repositories.jobs import JobRepository
 from ..storage.blob_service import StorageService
@@ -13,6 +14,10 @@ logger = get_logger(__name__)
 
 JOB_SERVICE_ERRORS = (RuntimeError, OSError, ValueError, TypeError)
 JOB_PROMPT_SETTINGS_ERRORS = (RuntimeError, ValueError, TypeError, KeyError)
+SPEAKER_HEADER_RE = re.compile(
+    r"^(?P<prefix>---\s*Speaker\s+)(?P<speaker_id>\w+)"
+    r"(?::\s*(?P<name>[^@\r\n]*?))?\s*@\s*(?P<timestamp>[\d:.\s]+)\s*---(?P<ending>\s*)$"
+)
 
 
 _job_cache = TTLCache(default_ttl=60.0)
@@ -55,6 +60,31 @@ class JobService:
         await invalidate_job_cache(job_id)
         await self.enrich_job_file_urls(updated_job)
         return updated_job
+
+    async def update_transcription_speaker_names(
+        self,
+        job: Dict[str, Any],
+        speaker_names: Dict[str, str],
+    ) -> str:
+        transcription_text = job.get("text_content")
+        transcription_url = job.get("transcription_file_path")
+        if not transcription_text:
+            if not transcription_url:
+                raise ValueError("Transcription not available")
+            transcription_text = await self.storage.download_text_from_blob(transcription_url)
+            if transcription_text is None:
+                raise ValueError("Transcription blob not available")
+
+        updated_text = rewrite_transcription_speaker_names(transcription_text, speaker_names)
+        if transcription_url:
+            await self.storage.upload_text_to_blob(transcription_url, updated_text)
+        if job.get("text_content"):
+            job["text_content"] = updated_text
+
+        job["updated_at"] = datetime.now(UTC).isoformat()
+        await self.repository.replace(job["id"], job)
+        await invalidate_job_cache(job["id"])
+        return updated_text
 
     async def get_jobs_with_filters(
         self,
@@ -356,3 +386,34 @@ async def invalidate_job_cache(job_id: str) -> None:
     from .job_route_workflow_service import invalidate_job_list_cache
 
     await invalidate_job_list_cache()
+
+
+def rewrite_transcription_speaker_names(
+    transcription_text: str,
+    speaker_names: Dict[str, str],
+) -> str:
+    normalized_names = {
+        str(speaker_id).strip(): str(name).strip()
+        for speaker_id, name in speaker_names.items()
+    }
+
+    def rewrite_line(line: str) -> str:
+        newline = ""
+        if line.endswith("\r\n"):
+            line, newline = line[:-2], "\r\n"
+        elif line.endswith("\n"):
+            line, newline = line[:-1], "\n"
+
+        match = SPEAKER_HEADER_RE.match(line)
+        if not match:
+            return f"{line}{newline}"
+
+        speaker_id = match.group("speaker_id")
+        if speaker_id not in normalized_names:
+            return f"{line}{newline}"
+
+        display_name = normalized_names[speaker_id]
+        name_part = f": {display_name}" if display_name else ""
+        return f"--- Speaker {speaker_id}{name_part} @ {match.group('timestamp').strip()} ---{newline}"
+
+    return "".join(rewrite_line(line) for line in transcription_text.splitlines(keepends=True))

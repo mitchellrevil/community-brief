@@ -4,6 +4,7 @@ import { TranscriptionViewer } from '@/features/recordings/ui/TranscriptionViewe
 import { Button } from '@/components/ui/button';
 
 interface TranscriptionTabProps {
+  jobId: string;
   transcriptionText: string | undefined;
   isProcessing: boolean;
   shouldShowError: boolean;
@@ -23,6 +24,7 @@ interface TranscriptionTabProps {
  * Handles all transcription-related UI logic
  */
 export function TranscriptionTab({
+  jobId,
   transcriptionText,
   isProcessing,
   shouldShowError,
@@ -77,7 +79,7 @@ export function TranscriptionTab({
   if (typeof transcriptionText === "string" && transcriptionText.length > 0) {
     return (
       <div className="animate-in slide-in-from-bottom duration-700 space-y-4">
-        <TranscriptionViewer transcriptionText={transcriptionText} onSegmentClick={onSegmentClick} compact={compact} />
+        <TranscriptionViewer jobId={jobId} transcriptionText={transcriptionText} onSegmentClick={onSegmentClick} compact={compact} />
         {transcriptionFilePath && !isMobile && (
           <Button
             onClick={() => onDownload(transcriptionFilePath, 'Transcription')}

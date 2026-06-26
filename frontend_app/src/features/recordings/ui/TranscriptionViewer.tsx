@@ -1,22 +1,27 @@
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertCircle,
+  Check,
+  Edit3,
+  Loader2,
   Search,
   Volume2,
   X,
 } from 'lucide-react';
-import type {TranscriptionSegment} from '@/lib/transcription-parser';
+import { toast } from 'sonner';
+import type { TranscriptionSegment } from '@/lib/transcription-parser';
 import {
-  
   filterSegmentsBySpeaker,
   parseTranscription,
-  searchSegments
+  searchSegments,
 } from '@/lib/transcription-parser';
+import { useUpdateTranscriptionSpeakerNamesMutation } from '@/features/recordings/data/queries';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 
 interface TranscriptionViewerProps {
+  jobId?: string;
   transcriptionText: string;
   onSegmentClick?: (segment: TranscriptionSegment) => void;
   className?: string;
@@ -28,6 +33,7 @@ interface TranscriptionViewerProps {
  * Displays parsed transcription with minimalist filters and improved readability
  */
 export function TranscriptionViewer({
+  jobId,
   transcriptionText,
   onSegmentClick,
   className = '',
@@ -36,6 +42,9 @@ export function TranscriptionViewer({
   const effectiveCompact = compact ?? false;
   const [selectedSpeakerId, setSelectedSpeakerId] = useState<string | 'all'>('all');
   const [searchQuery, setSearchQuery] = useState('');
+  const [isEditingSpeakers, setIsEditingSpeakers] = useState(false);
+  const [speakerEdits, setSpeakerEdits] = useState<Record<string, string>>({});
+  const updateSpeakerNamesMutation = useUpdateTranscriptionSpeakerNamesMutation();
 
   // Parse transcription
   const parsed = useMemo(
@@ -61,11 +70,39 @@ export function TranscriptionViewer({
   }, [parsed.segments, selectedSpeakerId, searchQuery]);
 
   const hasActiveFilters = selectedSpeakerId !== 'all' || searchQuery.trim() !== '';
+  const speakerEditDefaults = useMemo(
+    () => Object.fromEntries(parsed.speakers.map((speaker) => [speaker.id, speaker.displayName || ''])),
+    [parsed.speakers]
+  );
+  const hasSpeakerNameChanges = parsed.speakers.some(
+    (speaker) => (speakerEdits[speaker.id] || '').trim() !== (speaker.displayName || '')
+  );
+
+  useEffect(() => {
+    if (!isEditingSpeakers) {
+      setSpeakerEdits(speakerEditDefaults);
+    }
+  }, [isEditingSpeakers, speakerEditDefaults]);
 
   const clearFilters = useCallback(() => {
     setSelectedSpeakerId('all');
     setSearchQuery('');
   }, []);
+
+  const handleSaveSpeakerNames = useCallback(async () => {
+    if (!jobId || !hasSpeakerNameChanges) {
+      setIsEditingSpeakers(false);
+      return;
+    }
+
+    try {
+      await updateSpeakerNamesMutation.mutateAsync({ jobId, speakerNames: speakerEdits });
+      toast.success('Speaker names saved');
+      setIsEditingSpeakers(false);
+    } catch {
+      toast.error('Failed to save speaker names');
+    }
+  }, [hasSpeakerNameChanges, jobId, speakerEdits, updateSpeakerNamesMutation]);
 
   if (!parsed.isValid) {
     // Fallback: if the transcription text exists but doesn't match expected parser format
@@ -134,6 +171,18 @@ export function TranscriptionViewer({
             </Button>
           ))}
 
+          {jobId && parsed.speakers.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setIsEditingSpeakers(true)}
+              className="text-xs text-muted-foreground hover:text-foreground gap-1"
+            >
+              <Edit3 className="h-3 w-3" />
+              Names
+            </Button>
+          )}
+
           {/* Clear Filters */}
           {hasActiveFilters && (
             <Button
@@ -147,6 +196,60 @@ export function TranscriptionViewer({
             </Button>
           )}
         </div>
+
+        {isEditingSpeakers && (
+          <div className="rounded-md border border-border/60 bg-muted/20 p-3 space-y-3">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {parsed.speakers.map((speaker) => (
+                <label key={speaker.id} className="flex items-center gap-2 text-xs">
+                  <span className="w-16 shrink-0 font-medium text-muted-foreground">
+                    Speaker {speaker.id}
+                  </span>
+                  <Input
+                    value={speakerEdits[speaker.id] || ''}
+                    onChange={(event) =>
+                      setSpeakerEdits((current) => ({
+                        ...current,
+                        [speaker.id]: event.target.value,
+                      }))
+                    }
+                    placeholder={`Speaker ${speaker.id}`}
+                    maxLength={100}
+                    className="h-8 text-xs"
+                  />
+                </label>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setSpeakerEdits(speakerEditDefaults);
+                  setIsEditingSpeakers(false);
+                }}
+                disabled={updateSpeakerNamesMutation.isPending}
+                className="h-8 w-8 p-0"
+                aria-label="Cancel speaker name edit"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleSaveSpeakerNames}
+                disabled={updateSpeakerNamesMutation.isPending}
+                className="h-8 w-8 p-0"
+                aria-label="Save speaker names"
+              >
+                {updateSpeakerNamesMutation.isPending ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Check className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Results Counter - Minimal */}
         {hasActiveFilters && (

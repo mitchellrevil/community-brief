@@ -193,6 +193,27 @@ class JobRouteWorkflowService:
         updated_job = await job_service.update_job_display_name(job_id, display_name)
         return {"status": 200, "job": updated_job}
 
+    async def update_transcription_speaker_names(
+        self,
+        *,
+        job_id: str,
+        speaker_names: Dict[str, str],
+        current_user: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        job_service = self._job_service()
+        job = await job_service.get_job(job_id)
+        if not job:
+            raise ResourceNotFoundError("Job", job_id)
+        if not check_job_access(job, current_user, "edit"):
+            raise PermissionError("Access denied to job")
+
+        try:
+            updated_text = await job_service.update_transcription_speaker_names(job, speaker_names)
+        except ValueError as exc:
+            raise ResourceNotReadyError(str(exc), {"job_id": job_id}) from exc
+
+        return {"status": 200, "transcription": updated_text}
+
     async def soft_delete_job(
         self,
         *,

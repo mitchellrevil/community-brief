@@ -558,6 +558,16 @@ class InMemoryBlobFake:
                 return content.decode("utf-8")
             except UnicodeDecodeError:
                 return None
+
+    async def upload_text_to_blob(self, blob_url: str, text_content: str) -> str:
+        """Overwrite text content at an existing blob URL."""
+        blob_name = self._extract_blob_name(blob_url)
+        if not blob_name:
+            raise ValueError(f"Invalid blob URL: {blob_url}")
+
+        async with self._lock:
+            self._blobs[blob_name] = text_content.encode("utf-8")
+            return blob_url.split("?", 1)[0]
     
     async def download_docx_text_from_blob(self, blob_url: str) -> Optional[str]:
         """Download and extract text from a .docx blob (mocked for testing)."""

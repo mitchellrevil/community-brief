@@ -276,6 +276,31 @@ class TestGetJobTranscription:
                 storage_service=storage_svc,
             )
 
+    @pytest.mark.asyncio
+    async def test_update_transcription_speaker_names(self, mock_current_user):
+        """Test persisting speaker display names for a transcription."""
+        job = {
+            "id": "job-123",
+            "user_id": "user-123",
+            "text_content": "--- Speaker 1 @ 00:00:00.120 ---\n  [00:00:00.120] Hello\n",
+        }
+        updated_text = "--- Speaker 1: Jane Smith @ 00:00:00.120 ---\n  [00:00:00.120] Hello\n"
+        job_svc = AsyncMock()
+        job_svc.get_job.return_value = job
+        job_svc.update_transcription_speaker_names.return_value = updated_text
+
+        from app.api.v1.routes.jobs import SpeakerNamesUpdateRequest
+
+        result = await jobs_router.update_job_transcription_speakers(
+            job_id="job-123",
+            update_request=SpeakerNamesUpdateRequest(speaker_names={"1": "Jane Smith"}),
+            current_user=mock_current_user,
+            job_svc=job_svc,
+        )
+
+        assert result == {"status": 200, "transcription": updated_text}
+        job_svc.update_transcription_speaker_names.assert_awaited_once_with(job, {"1": "Jane Smith"})
+
 
 class TestGetJobAnalysisDocument:
     """Tests for analysis document download endpoint."""

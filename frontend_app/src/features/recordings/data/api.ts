@@ -24,9 +24,9 @@ import {
   ADMIN_PERMANENT_DELETE_API,
   CHAT_ENDPOINTS,
   JOBS_API,
-  JOB_ANALYSIS_DOCUMENT_API,
   JOB_REPROCESS_API,
   JOB_STATUS_STREAM_API,
+  JOB_TRANSCRIPTION_SPEAKERS_API,
   SHARED_JOBS_API,
   TRANSCRIPTION_API,
   UPLOAD_COMPLETE_API,
@@ -176,16 +176,14 @@ export async function getAudioTranscription(id: string) {
   return response.data || '';
 }
 
-export async function downloadAnalysisDocument(jobId: string, analysisFilePath?: string): Promise<Blob> {
-  const response = await httpClient.get(JOB_ANALYSIS_DOCUMENT_API(jobId), {
-    params: analysisFilePath ? { analysis_file_path: analysisFilePath } : undefined,
-    responseType: 'blob',
+export async function updateTranscriptionSpeakerNames(
+  jobId: string,
+  speakerNames: Record<string, string>
+): Promise<{ status: number; transcription: string }> {
+  const response = await httpClient.patch(JOB_TRANSCRIPTION_SPEAKERS_API(jobId), {
+    speaker_names: speakerNames,
   });
-  return response.data instanceof Blob
-    ? response.data
-    : new Blob([response.data], {
-        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-      });
+  return response.data;
 }
 
 /**

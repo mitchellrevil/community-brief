@@ -20,6 +20,7 @@ export interface TranscriptionSegment {
 export interface TranscriptionSpeaker {
   id: string;
   label: string;
+  displayName?: string;
   color: string;
   segmentCount: number;
 }
@@ -122,6 +123,7 @@ export function generateSpeakerColor(speakerId: string): string {
  * Main parser function for transcription text
  * Parses format like:
  * --- Speaker 1 @ 00:00:00.120 ---
+ * --- Speaker 1: Jane Smith @ 00:00:00.120 ---
  * [00:00:00.120] text here [Confidence: 0.69]
  * [00:00:10.919] more text [Confidence: 0.78]
  */
@@ -141,20 +143,22 @@ export function parseTranscription(transcriptionText: string): ParsedTranscripti
   let segmentId = 0;
 
   // Split by speaker sections
-  const speakerSections = transcriptionText.split(/---\s*Speaker\s+(\d+|\w+)\s*@\s*([\d:.\s]+)\s*---/);
+  const speakerSections = transcriptionText.split(/---\s*Speaker\s+(\d+|\w+)(?::\s*([^@\r\n]*?))?\s*@\s*([\d:.\s]+)\s*---/);
 
   // Process alternating speaker info and content
-  for (let i = 1; i < speakerSections.length; i += 3) {
+  for (let i = 1; i < speakerSections.length; i += 4) {
     const speakerId = speakerSections[i];
-    const speakerContent = speakerSections[i + 2] || '';
+    const displayName = speakerSections[i + 1]?.trim() || undefined;
+    const speakerContent = speakerSections[i + 3] || '';
 
     if (!speakerId || !speakerContent.trim()) continue;
 
-    const speakerLabel = `Speaker ${speakerId}`;
+    const speakerLabel = displayName || `Speaker ${speakerId}`;
     if (!speakersMap.has(speakerId)) {
       speakersMap.set(speakerId, {
         id: speakerId,
         label: speakerLabel,
+        displayName,
         color: generateSpeakerColor(speakerId),
         segmentCount: 0,
       });

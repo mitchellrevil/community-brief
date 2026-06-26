@@ -11,7 +11,7 @@ from ....deps import (
     get_job_upload_service,
     get_storage_service,
 )
-from ....schemas.jobs import JobUpdateRequest
+from ....schemas.jobs import JobUpdateRequest, SpeakerNamesUpdateRequest
 from ....services.jobs.job_service import JobService
 from ....services.jobs.job_permissions import JobPermissions
 from ....services.jobs.job_management_service import JobManagementService
@@ -83,27 +83,17 @@ async def get_job_transcription(
     return StreamingResponse(stream_text(), media_type="text/plain")
 
 
-@router.get("/jobs/{job_id}/analysis-document")
-async def get_job_analysis_document(
+@router.patch("/jobs/{job_id}/transcription/speakers")
+async def update_job_transcription_speakers(
     job_id: str,
-    analysis_file_path: Optional[str] = Query(None),
+    update_request: SpeakerNamesUpdateRequest,
     current_user: Dict[str, Any] = Depends(get_current_user),
     job_svc: JobService = Depends(get_job_service),
-    storage_service: StorageServiceInterface = Depends(get_storage_service),
 ):
-    document = await JobRouteWorkflowService(
-        job_service=job_svc,
-        storage_service=storage_service,
-    ).get_analysis_document(
+    return await JobRouteWorkflowService(job_service=job_svc).update_transcription_speaker_names(
         job_id=job_id,
+        speaker_names=update_request.speaker_names,
         current_user=current_user,
-        analysis_file_path=analysis_file_path,
-    )
-    filename = document["filename"].replace('"', "")
-    return StreamingResponse(
-        iter([document["content"]]),
-        media_type=document["media_type"],
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
