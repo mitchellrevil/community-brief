@@ -24,8 +24,10 @@ class CosmosService:
     ) -> None:
         """Initialize the CosmosService with config, optional credential, and cosmos client."""
         self.config = config
-        # Lazy import of DefaultAzureCredential to avoid import-time failures
-        if credential is not None:
+        cosmos_key = getattr(config, "cosmos_key", None)
+        if cosmos_key:
+            self.credential = cosmos_key
+        elif credential is not None:
             self.credential = credential
         else:
             try:
@@ -270,15 +272,18 @@ class CosmosService:
 
 
 def get_cosmos_client() -> CosmosClient:
-    """Factory to create a CosmosClient using AppConfig and DefaultAzureCredential.
+    """Factory to create a CosmosClient using AppConfig authentication.
 
     This mirrors the expectation in other modules (for example, session_cleanup.py)
     which import `get_cosmos_client` from this module.
     """
     config = AppConfig()
-    try:
-        from azure.identity import DefaultAzureCredential
-        credential = DefaultAzureCredential(logging_enable=True)
-    except (ImportError, ModuleNotFoundError):
-        credential = None
+    if config.cosmos_key:
+        credential = config.cosmos_key
+    else:
+        try:
+            from azure.identity import DefaultAzureCredential
+            credential = DefaultAzureCredential(logging_enable=True)
+        except (ImportError, ModuleNotFoundError):
+            credential = None
     return CosmosClient(url=config.cosmos_endpoint, credential=credential)

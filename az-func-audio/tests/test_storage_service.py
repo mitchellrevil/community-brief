@@ -174,6 +174,7 @@ class TestStorageServiceInitialization:
 
     def test_init_with_provided_credential(self, app_config):
         """Should initialize with provided credential."""
+        app_config.storage_account_key = None
         mock_credential = Mock()
         mock_blob_client = Mock()
 
@@ -189,6 +190,7 @@ class TestStorageServiceInitialization:
     @patch("azure.identity.DefaultAzureCredential")
     def test_init_without_credential(self, mock_cred_class, app_config):
         """Should initialize with DefaultAzureCredential when none provided."""
+        app_config.storage_account_key = None
         mock_cred_instance = Mock()
         mock_cred_class.return_value = mock_cred_instance
 
@@ -200,6 +202,14 @@ class TestStorageServiceInitialization:
     @patch("azure.identity.DefaultAzureCredential", side_effect=ImportError("Import error"))
     def test_init_credential_import_failure(self, mock_cred_class, app_config):
         """Should set credential to None if import fails."""
+        app_config.storage_account_key = None
         service = StorageService(config=app_config)
 
         assert service.credential is None
+
+    def test_init_prefers_storage_account_key(self, app_config):
+        app_config.storage_account_key = "test-storage-key"
+
+        service = StorageService(config=app_config, blob_service_client=Mock())
+
+        assert service.credential == "test-storage-key"

@@ -3,10 +3,15 @@
   "logging": {
     "fileLoggingMode": "debugOnly",
     "logLevel": {
-      "default": "Debug",
-      "Host.Aggregator": "Debug",
-      "Host.Results": "Debug",
-      "Function": "Debug"
+      "default": "Warning",
+      "Host.Aggregator": "Warning",
+      "Host.Results": "Information",
+      "Function": "Information",
+      "Function.blob_trigger.User": "Information",
+      "Function.ReprocessAnalysis.User": "Information",
+      "Worker": "Information",
+      "Azure.Core": "Warning",
+      "Azure.Storage": "Warning"
     },
     "applicationInsights": {
       "samplingSettings": {

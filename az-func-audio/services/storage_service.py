@@ -32,8 +32,9 @@ class StorageService:
     def __init__(self, config: AppConfig, credential: Any = None, blob_service_client: BlobServiceClient = None) -> None:
         """Initialize the StorageService with config, optional credential, and blob service client."""
         self.config = config
-        # Lazy import of DefaultAzureCredential to avoid import-time failures
-        if credential is not None:
+        if self.config.storage_account_key:
+            self.credential = self.config.storage_account_key
+        elif credential is not None:
             self.credential = credential
         else:
             try:
@@ -659,9 +660,8 @@ class StorageService:
     def generate_sas_url(self, blob_url: str, expiry_hours: int = 1) -> str:
         """Generate a read-only SAS URL for a blob.
 
-        This will use a user delegation key if the BlobServiceClient has
-        a token credential (DefaultAzureCredential), otherwise it will
-        attempt to use the account key from the environment.
+        This uses the account key when configured, otherwise it falls back to
+        a user delegation key from the BlobServiceClient.
         """
         try:
             container, blob_name = self._parse_blob_url(blob_url)
@@ -676,8 +676,25 @@ class StorageService:
                 parsed_account = urlparse(self.config.storage_account_url)
                 account_name = parsed_account.netloc.split(".")[0]
 
-            # Prefer user delegation key (when using DefaultAzureCredential)
-            if self.credential is not None and hasattr(self.blob_service_client, "get_user_delegation_key"):
+            account_key = self.config.storage_account_key
+            if account_key:
+                start = time.perf_counter()
+                sas = generate_blob_sas(
+                    account_name=account_name,
+                    container_name=container,
+                    blob_name=blob_name,
+                    account_key=account_key,
+                    permission=BlobSasPermissions(read=True),
+                    expiry=expiry,
+                )
+                end = time.perf_counter()
+                logger.info(
+                    "storage.sas_generated",
+                    blob_url=blob_url,
+                    elapsed_ms=int((end - start) * 1000),
+                    method="account_key",
+                )
+            elif self.credential is not None and hasattr(self.blob_service_client, "get_user_delegation_key"):
                 start = time.perf_counter()
                 # Use user delegation key; start now and expire at expiry
                 key = self.blob_service_client.get_user_delegation_key(datetime.now(UTC), expiry)
@@ -697,23 +714,7 @@ class StorageService:
                     method="user_delegation_key",
                 )
             else:
-                start = time.perf_counter()
-                account_key = self.config.storage_account_key
-                sas = generate_blob_sas(
-                    account_name=account_name,
-                    container_name=container,
-                    blob_name=blob_name,
-                    account_key=account_key,
-                    permission=BlobSasPermissions(read=True),
-                    expiry=expiry,
-                )
-                end = time.perf_counter()
-                logger.info(
-                    "storage.sas_generated",
-                    blob_url=blob_url,
-                    elapsed_ms=int((end - start) * 1000),
-                    method="account_key",
-                )
+                raise StorageServiceError("Storage account key or token credential is required")
 
             if not sas:
                 raise StorageServiceError("Failed to generate SAS token")

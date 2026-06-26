@@ -23,6 +23,15 @@ def get_required_env_var(var_name: str) -> str:
     return value
 
 
+def _connection_string_value(setting_name: str, key: str) -> Optional[str]:
+    connection_string = os.getenv(setting_name, "")
+    for part in connection_string.split(";"):
+        name, separator, value = part.partition("=")
+        if separator and name == key:
+            return value
+    return None
+
+
 def resolve_log_level() -> str:
     configured_level = os.getenv("LOG_LEVEL")
     if configured_level:
@@ -39,6 +48,7 @@ class AppConfig:
 
             # Cosmos DB settings
             self.cosmos_endpoint: str = get_required_env_var("AZURE_COSMOS_ENDPOINT")
+            self.cosmos_key: Optional[str] = os.getenv("AZURE_COSMOS_KEY")
             self.cosmos_database: str = os.getenv("AZURE_COSMOS_DB", "VoiceDB")
             self.cosmos_jobs_container: str = f"{prefix}jobs"
             self.cosmos_prompts_container: str = f"{prefix}prompts"            # Supported Audio Extensions List
@@ -118,6 +128,11 @@ class AppConfig:
             raw_container = os.getenv("AZURE_STORAGE_RECORDINGS_CONTAINER", "")
             self.storage_recordings_container: str = raw_container.strip("/") if raw_container else raw_container
             self.storage_account_key: Optional[str] = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
+            if not self.storage_account_key:
+                self.storage_account_key = (
+                    _connection_string_value("AzureWebJobsStorage", "AccountKey")
+                    or _connection_string_value("audio", "AccountKey")
+                )
             self.blob_trigger_lookup_retries: int = int(os.getenv("BLOB_TRIGGER_LOOKUP_RETRIES", "6"))
             self.blob_trigger_lookup_delay_seconds: float = float(
                 os.getenv("BLOB_TRIGGER_LOOKUP_DELAY_SECONDS", "2.0")
@@ -131,6 +146,7 @@ class AppConfig:
 
             self.speech_endpoint: str = os.getenv("AZURE_SPEECH_ENDPOINT")
             self.speech_deployment: str = os.getenv("AZURE_SPEECH_DEPLOYMENT")
+            self.speech_key: Optional[str] = os.getenv("AZURE_SPEECH_KEY")
             
             # Fast Transcription API settings
             self.enable_fast_transcription: bool = os.getenv("ENABLE_FAST_TRANSCRIPTION", "true").lower() == "true"
@@ -140,7 +156,7 @@ class AppConfig:
             self.azure_openai_endpoint: str = os.getenv("AZURE_OPENAI_ENDPOINT")
             self.azure_openai_deployment: str = os.getenv("AZURE_OPENAI_DEPLOYMENT")
             self.azure_openai_version: str = os.getenv("AZURE_OPENAI_API_VERSION")
-            self.azure_openai_api_key: Optional[str] = os.getenv("AZURE_OPENAI_API_KEY")
+            self.azure_openai_api_key: Optional[str] = os.getenv("AZURE_OPENAI_API_KEY") or os.getenv("AZURE_OPENAI_KEY")
 
             # Reasoning settings
             self.enable_reasoning: bool = os.getenv("ENABLE_REASONING", "false").lower() == "true"

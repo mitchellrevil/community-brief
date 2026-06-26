@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 import requests
 import structlog
 from azure.storage.blob import BlobServiceClient
+from azure.core.exceptions import AzureError
 
 from config import AppConfig
 
@@ -37,7 +38,7 @@ class TranscriptionServiceError(Exception):
     """Raised when transcription submission, polling, or parsing fails."""
 
 
-TRANSCRIPTION_ERRORS = (TranscriptionServiceError, RuntimeError, ValueError, TypeError, OSError)
+TRANSCRIPTION_ERRORS = (TranscriptionServiceError, AzureError, RuntimeError, ValueError, TypeError, OSError)
 
 
 @dataclass(frozen=True)
@@ -74,8 +75,12 @@ class FastTranscriptionService:
         self.storage_service = storage_service
         self.session = requests.Session()
         self._fast_results_cache: Dict[str, Dict[str, Any]] = {}
+        self.speech_key = getattr(config, "speech_key", None)
+        self.storage_credential = getattr(config, "storage_account_key", None) or credential
 
-        if credential is not None:
+        if self.speech_key:
+            self.credential = None
+        elif credential is not None:
             self.credential = credential
         else:
             try:
@@ -146,8 +151,11 @@ class FastTranscriptionService:
         return token.token
 
     def _get_headers(self, api_type: TranscriptionAPI) -> Dict[str, str]:
-        token = self._get_auth_token()
-        headers = {"Authorization": f"Bearer {token}"}
+        if self.speech_key:
+            headers = {"Ocp-Apim-Subscription-Key": self.speech_key}
+        else:
+            token = self._get_auth_token()
+            headers = {"Authorization": f"Bearer {token}"}
         if api_type == TranscriptionAPI.BATCH:
             headers["Content-Type"] = "application/json"
         return headers
@@ -169,7 +177,7 @@ class FastTranscriptionService:
             account_name, container_name, blob_name = self._parse_blob_url(blob_url)
             blob_service_client = BlobServiceClient(
                 account_url=f"https://{account_name}.blob.core.windows.net",
-                credential=self.credential,
+                credential=self.storage_credential,
             )
             blob_client = blob_service_client.get_blob_client(
                 container=container_name,
@@ -190,7 +198,7 @@ class FastTranscriptionService:
             account_name, container_name, blob_name = self._parse_blob_url(blob_url)
             blob_service_client = BlobServiceClient(
                 account_url=f"https://{account_name}.blob.core.windows.net",
-                credential=self.credential,
+                credential=self.storage_credential,
             )
             blob_client = blob_service_client.get_blob_client(
                 container=container_name,
@@ -332,6 +340,7 @@ class FastTranscriptionService:
             "content length",
             "413",
             "request entity too large",
+            "without any recognized text",
         )
         return any(marker in message for marker in markers)
 
@@ -393,6 +402,10 @@ class FastTranscriptionService:
             files=files,
         )
 
+        self._require_transcript(
+            self._format_fast_transcription(result_data),
+            "Fast transcription",
+        )
         transcription_id = f"fast_{uuid.uuid4().hex}"
         self._cache_fast_result(transcription_id, result_data)
         return transcription_id

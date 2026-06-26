@@ -10,6 +10,23 @@ from unittest.mock import Mock
 from services.cosmos_service import CosmosService, CosmosServiceError
 
 
+def test_cosmos_service_prefers_key_over_default_credential(monkeypatch, app_config, mock_cosmos_client):
+    captured = {}
+    app_config.cosmos_key = "test-cosmos-key"
+
+    def fake_cosmos_client(*, url, credential):
+        captured["url"] = url
+        captured["credential"] = credential
+        return mock_cosmos_client
+
+    monkeypatch.setattr("services.cosmos_service.CosmosClient", fake_cosmos_client)
+
+    CosmosService(config=app_config)
+
+    assert captured["url"] == app_config.cosmos_endpoint
+    assert captured["credential"] == "test-cosmos-key"
+
+
 @pytest.mark.unit
 class TestCosmosServiceJobOperations:
     """Test job-related Cosmos operations."""

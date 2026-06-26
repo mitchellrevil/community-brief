@@ -94,6 +94,14 @@ class TestRouting:
 
 
 class TestSubmissionAndStatus:
+    def test_headers_use_speech_key_when_configured(self, mock_config: Mock):
+        mock_config.speech_key = "test-speech-key"
+        service = FastTranscriptionService(config=mock_config)
+
+        headers = service._get_headers(TranscriptionAPI.FAST)
+
+        assert headers == {"Ocp-Apim-Subscription-Key": "test-speech-key"}
+
     def test_submit_fast_transcription_success(self, service: FastTranscriptionService):
         service._download_audio_from_blob = Mock(return_value=b"fake-audio")
         service.session.request = Mock(
@@ -288,6 +296,22 @@ class TestFallbackBehavior:
             side_effect=TranscriptionServiceError("Audio duration too long")
         )
         service._submit_batch_transcription = Mock(return_value="batch789")
+
+        transcription_id = service.submit_transcription_job(
+            "https://test.blob.core.windows.net/recordings/audio.wav",
+            file_size_bytes=10 * 1024 * 1024,
+            audio_duration_minutes=10,
+        )
+
+        assert transcription_id == "batch789"
+
+    def test_submit_transcription_job_falls_back_to_batch_when_fast_result_is_empty(
+        self,
+        service: FastTranscriptionService,
+    ):
+        service._download_audio_from_blob = Mock(return_value=b"fake-audio")
+        service._submit_batch_transcription = Mock(return_value="batch789")
+        service.session.request = Mock(return_value=_mock_response(200, {"phrases": []}))
 
         transcription_id = service.submit_transcription_job(
             "https://test.blob.core.windows.net/recordings/audio.wav",
