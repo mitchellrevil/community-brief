@@ -38,7 +38,7 @@ export function getDisplayFilename(filePath?: string): string {
   }
 }
 
-export function getFileType(filePath?: string): 'docx' | 'pdf' | 'txt' | 'unknown' {
+export function getFileType(filePath?: string): 'docx' | 'pdf' | 'txt' | 'md' | 'unknown' {
   if (!filePath) {
     return 'unknown';
   }
@@ -52,8 +52,8 @@ export function getFileType(filePath?: string): 'docx' | 'pdf' | 'txt' | 'unknow
       ? 'docx'
       : extension === 'pdf'
         ? 'pdf'
-        : extension === 'txt'
-          ? 'txt'
+        : extension === 'txt' || extension === 'md'
+          ? extension
           : 'unknown';
   } catch {
     const lastDot = filePath.lastIndexOf('.');
@@ -68,8 +68,8 @@ export function getFileType(filePath?: string): 'docx' | 'pdf' | 'txt' | 'unknow
       ? 'docx'
       : extension === 'pdf'
         ? 'pdf'
-        : extension === 'txt'
-          ? 'txt'
+        : extension === 'txt' || extension === 'md'
+          ? extension
           : 'unknown';
   }
 }
@@ -78,7 +78,8 @@ export function getAttemptFileName(filename: string, attemptNumber: number): str
   const parts = filename.split('.');
   if (parts.length > 1) {
     const extension = parts.pop();
-    return `${parts.join('.')}_v${attemptNumber}.${extension}`;
+    const downloadExtension = extension?.toLowerCase() === 'md' ? 'docx' : extension;
+    return `${parts.join('.')}_v${attemptNumber}.${downloadExtension}`;
   }
 
   return `${filename}_v${attemptNumber}`;

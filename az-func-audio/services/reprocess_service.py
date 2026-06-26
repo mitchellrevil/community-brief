@@ -163,7 +163,11 @@ class ReprocessService:
                 raise ValueError("Analysis service returned no text")
 
             blob_name = build_analysis_blob_name(job.get("file_path", job_id))
-            analysis_blob_url = storage_service.generate_and_upload_docx(analysis_text, blob_name)
+            analysis_blob_url = storage_service.upload_text(
+                config.storage_recordings_container,
+                blob_name,
+                analysis_text,
+            )
             target_job, new_job_created = self._build_target_job(
                 job,
                 create_new_job=create_new_job,

@@ -51,6 +51,7 @@ export const SELF_ASSIGN_BUSINESS_UNIT_API = `${USERS_API}/me/business-units`;
 export const JOBS_API = `${API_V1_BASE}/jobs`;
 export const JOB_BY_ID = (jobId: string) => `${JOBS_API}/${jobId}`;
 export const JOB_TRANSCRIPTION_API = (jobId: string) => `${JOBS_API}/${jobId}/transcription`;
+export const JOB_ANALYSIS_DOCUMENT_API = (jobId: string) => `${JOBS_API}/${jobId}/analysis-document`;
 export const JOB_REPROCESS_API = (jobId: string) => `${JOBS_API}/${jobId}/reprocess`;
 export const JOB_STATUS_STREAM_API = (jobId: string) => `${API_V1_BASE}/stream/jobs/${jobId}/status`;
 export const JOB_SHARE_API = (jobId: string) => `${JOBS_API}/${jobId}/share`;

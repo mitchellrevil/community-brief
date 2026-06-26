@@ -41,7 +41,7 @@ async def test_stream_chat_response_loads_context_and_stores_response_id(chat_hi
     job = {
         "id": "j1",
         "text_content": "hello world",
-        "analysis_file_path": "analysis.txt",
+        "analysis_file_path": "analysis.md",
     }
     chat_history_service.get_job.return_value = job
     storage_service.download_text_from_blob.return_value = "analysis content"

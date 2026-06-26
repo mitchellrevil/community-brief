@@ -30,11 +30,13 @@ describe('documentViewerAttempts', () => {
     expect(getFileType('/analysis/latest.docx')).toBe('docx');
     expect(getFileType('/analysis/latest.pdf')).toBe('pdf');
     expect(getFileType('/analysis/latest.txt?token=123')).toBe('txt');
+    expect(getFileType('/analysis/latest.md?token=123')).toBe('md');
     expect(getFileType('/analysis/latest')).toBe('unknown');
   });
 
   it('builds attempt-specific download names', () => {
     expect(getAttemptFileName('analysis.docx', 2)).toBe('analysis_v2.docx');
+    expect(getAttemptFileName('analysis.md', 2)).toBe('analysis_v2.docx');
     expect(getAttemptFileName('analysis', 3)).toBe('analysis_v3');
   });
 });

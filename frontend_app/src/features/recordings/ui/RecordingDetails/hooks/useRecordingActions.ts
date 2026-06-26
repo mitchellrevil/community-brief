@@ -17,6 +17,21 @@ export function useRecordingActions() {
     }
   };
 
+  const handleBlobDownload = (blob: Blob, fileName: string) => {
+    const url = URL.createObjectURL(blob);
+    try {
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = fileName;
+      link.click();
+      fileToasts.downloaded(fileName);
+    } catch {
+      fileToasts.downloadFailed(fileName);
+    } finally {
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+  };
+
   const copyToClipboard = async (text: string, label: string = 'Text') => {
     try {
       await navigator.clipboard.writeText(text);
@@ -33,6 +48,7 @@ export function useRecordingActions() {
     deleteDialogOpen,
     setDeleteDialogOpen,
     handleDownload,
+    handleBlobDownload,
     copyToClipboard,
   };
 }

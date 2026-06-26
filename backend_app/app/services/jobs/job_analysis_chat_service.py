@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Sequence
 from typing import Any
+from urllib.parse import urlparse
 
 from ...core.logging import get_logger
 from ..storage.blob_service import StorageService
@@ -161,9 +162,10 @@ class JobAnalysisChatService:
             job_id=job_id,
             analysis_url=analysis_file_path[:80],
         )
-        if analysis_file_path.endswith(".txt"):
+        extension = self._analysis_file_extension(analysis_file_path)
+        if extension in {".txt", ".md"}:
             return await self.storage_service.download_text_from_blob(analysis_file_path)
-        if analysis_file_path.endswith(".docx"):
+        if extension == ".docx":
             analysis_text = await self.storage_service.download_docx_text_from_blob(analysis_file_path)
             if analysis_text:
                 logger.info(
@@ -181,6 +183,14 @@ class JobAnalysisChatService:
             file_suffix=analysis_file_path[-20:],
         )
         return None
+
+    @staticmethod
+    def _analysis_file_extension(file_path: str) -> str:
+        path = urlparse(file_path).path or file_path
+        filename = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+        if "." not in filename:
+            return ""
+        return f".{filename.rsplit('.', 1)[-1].lower()}"
 
     @staticmethod
     def _conversation_history_for_request(

@@ -78,6 +78,7 @@ export const RecordingActionsCard = memo(function RecordingActionsCardView({
     const questionMark = filePath.indexOf('?');
     const endPos = questionMark !== -1 ? questionMark : filePath.length;
     const extension = lastDot !== -1 && lastDot < endPos ? filePath.substring(lastDot + 1, endPos).toLowerCase() : 'docx';
+    if (extension === 'md' || extension === 'txt') return 'docx';
     return extension || 'docx';
   };
 

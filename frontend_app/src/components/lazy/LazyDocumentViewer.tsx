@@ -288,7 +288,7 @@ function LazyDocumentViewerInner({
         } finally {
           setIsLoading(false);
         }
-      } else if (activeAnalysisFilePath && fileType === 'txt') {
+      } else if (activeAnalysisFilePath && (fileType === 'txt' || fileType === 'md')) {
         setIsLoading(true);
         try {
           const response = await fetch(activeAnalysisFilePath);

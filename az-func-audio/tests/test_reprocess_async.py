@@ -39,8 +39,8 @@ def test_build_analysis_blob_name_includes_system_tag():
     tag = get_system_generated_tag()
     assert tag in blob_name, f"Expected blob name to contain '{tag}' but got: {blob_name}"
     assert "_reprocess_" in blob_name, "Expected blob name to contain '_reprocess_' pattern"
-    # Verify the pattern: base__SYS___reprocess_timestamp_suffix.docx
-    assert blob_name.endswith(".docx"), "Expected blob name to end with .docx"
+    # Verify the pattern: base__SYS___reprocess_timestamp_suffix.md
+    assert blob_name.endswith(".md"), "Expected blob name to end with .md"
     assert tag + "_reprocess_" in blob_name, f"Expected pattern '{tag}_reprocess_' in blob name"
 
 
@@ -72,7 +72,7 @@ def test_reprocess_generates_tagged_blob_name(mock_get_analysis, mock_get_storag
 
     storage_service = Mock()
     storage_service.download_text_from_blob.return_value = "Transcribed text here"
-    storage_service.generate_and_upload_docx.return_value = "https://storage.blob.core.windows.net/recordings/test/audio__SYS___reprocess_20260131120000_abc123.docx"
+    storage_service.upload_text.return_value = "https://storage.blob.core.windows.net/recordings/test/audio__SYS___reprocess_20260131120000_abc123.md"
     mock_get_storage.return_value = storage_service
 
     analysis_service = Mock()
@@ -91,10 +91,10 @@ def test_reprocess_generates_tagged_blob_name(mock_get_analysis, mock_get_storag
 
     # Assert
     assert resp.status_code == 200
-    storage_service.generate_and_upload_docx.assert_called_once()
+    storage_service.upload_text.assert_called_once()
     
-    # Extract the blob name that was passed to generate_and_upload_docx
-    call_args = storage_service.generate_and_upload_docx.call_args
+    # Extract the blob name that was passed to upload_text
+    call_args = storage_service.upload_text.call_args
     blob_name = call_args[0][1]  # Second positional argument is the blob name
     
     # Verify the blob name pattern includes both reprocess and system tag
@@ -135,7 +135,7 @@ def test_reprocess_returns_200_and_processes_synchronously(mock_get_analysis, mo
 
     storage_service = Mock()
     storage_service.download_text_from_blob.return_value = "Transcribed text here"
-    storage_service.generate_and_upload_docx.return_value = "https://storage.blob.core.windows.net/recordings/analysis.docx"
+    storage_service.upload_text.return_value = "https://storage.blob.core.windows.net/recordings/analysis.md"
     mock_get_storage.return_value = storage_service
 
     analysis_service = Mock()
@@ -172,9 +172,9 @@ def test_blob_trigger_skips_tagged_reprocess_artifact():
     """
     # Arrange - Simulate blob names with reprocess + system tag pattern
     tagged_blob_names = [
-        "test/audio__SYS___reprocess_20260131120000_abc123.docx",
-        "audio__SYS___reprocess_20251201093045_def456.docx",
-        "folder/subfolder/recording__SYS___reprocess_20260115000000_ghi789.docx",
+        "test/audio__SYS___reprocess_20260131120000_abc123.md",
+        "audio__SYS___reprocess_20251201093045_def456.md",
+        "folder/subfolder/recording__SYS___reprocess_20260115000000_ghi789.md",
     ]
     
     # Act & Assert
@@ -228,6 +228,7 @@ def test_is_reprocess_artifact_detects_patterns():
     assert is_reprocess_artifact("folder/file_reprocess_123.docx")
     assert is_reprocess_artifact("file__SYS___reprocess_123.docx")
     assert is_reprocess_artifact("analysis_output.docx")
+    assert is_reprocess_artifact("analysis_output.md")
     assert is_reprocess_artifact("file_analysis.pdf")
     assert is_reprocess_artifact("test/audio_analysis.docx")
     assert is_reprocess_artifact("FOLDER/FILE_REPROCESS_ABC.DOCX")  # Case insensitive
@@ -343,7 +344,7 @@ def test_reprocess_with_create_new_job_marks_original_job_completed(mock_get_ana
 
     storage_service = Mock()
     storage_service.download_text_from_blob.return_value = "Transcribed text here"
-    storage_service.generate_and_upload_docx.return_value = "https://storage.blob.core.windows.net/recordings/test/audio__SYS___reprocess_20260131120000_abc123.docx"
+    storage_service.upload_text.return_value = "https://storage.blob.core.windows.net/recordings/test/audio__SYS___reprocess_20260131120000_abc123.md"
     mock_get_storage.return_value = storage_service
 
     analysis_service = Mock()

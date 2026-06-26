@@ -15,9 +15,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { JobDeleteDialog } from '@/features/recordings/ui/JobDeleteDialog';
 import { JobShareDialog } from '@/features/recordings/ui/JobShareDialog';
 import { ReprocessAnalysisDialog } from '@/features/recordings/ui/ReprocessAnalysisDialog';
+import { downloadAnalysisDocument } from '@/features/recordings/data/api';
 import { useUserPermissions } from '@/hooks/usePermissions';
 import { getDisplayName } from '@/lib/display-name-utils';
 import { getStorageItem, setStorageItem } from '@/lib/storage';
+import { fileToasts } from '@/lib/toast-utils';
 import { AnimatePresence, fadeIn, fadeInUp, slideInFromRight, staggerContainer } from '@/lib/motion';
 import { MotionDiv } from '@/components/ui/motion';
 
@@ -28,6 +30,27 @@ import { MotionDiv } from '@/components/ui/motion';
 function getTranscriptionPopoverStorageKey(userId: string | undefined, recordingId?: string | undefined): string | null {
   if (!userId || !recordingId) return null;
   return `community-brief:${userId}:transcription-popover-dismissed:${recordingId}`;
+}
+
+function stripUrlQuery(value?: string | null): string {
+  return (value || '').split('?', 1)[0].split('#', 1)[0];
+}
+
+function getPathExtension(value?: string | null): string {
+  const path = stripUrlQuery(value);
+  const filename = path.split('/').pop()?.split('\\').pop() || '';
+  const dot = filename.lastIndexOf('.');
+  return dot === -1 ? '' : filename.substring(dot).toLowerCase();
+}
+
+function getAnalysisDownloadName(fileName: string, sourcePath?: string | null): string {
+  const extension = getPathExtension(sourcePath);
+  if (extension !== '.md' && extension !== '.txt') {
+    return fileName;
+  }
+  return /\.[^.]+$/.test(fileName)
+    ? fileName.replace(/\.[^.]+$/, '.docx')
+    : `${fileName}.docx`;
 }
 
 /**
@@ -196,12 +219,41 @@ export function RecordingDetailsPage() {
     shareDialogOpen,
     setShareDialogOpen,
     handleDownload,
+    handleBlobDownload,
     copyToClipboard,
   } = useRecordingActions();
 
   const [chatOpen, setChatOpen] = React.useState(false);
 
   const [reprocessDialogOpen, setReprocessDialogOpen] = React.useState(false);
+
+  const isAnalysisPath = React.useCallback((path: string) => {
+    const target = stripUrlQuery(path);
+    if (!target) return false;
+    if (stripUrlQuery(recording?.analysis_file_path) === target) return true;
+    return Boolean(recording?.analysis_attempts?.some((attempt: any) => (
+      stripUrlQuery(attempt?.analysis_file_path) === target
+    )));
+  }, [recording?.analysis_file_path, recording?.analysis_attempts]);
+
+  const handleDownloadAnalysis = React.useCallback(async (path: string, fileName: string) => {
+    if (!jobId) return;
+    const downloadName = getAnalysisDownloadName(fileName, path);
+    try {
+      const blob = await downloadAnalysisDocument(jobId, path);
+      handleBlobDownload(blob, downloadName);
+    } catch {
+      fileToasts.downloadFailed(downloadName);
+    }
+  }, [handleBlobDownload, jobId]);
+
+  const handleContentDownload = React.useCallback((path: string, fileName: string) => {
+    if (isAnalysisPath(path)) {
+      void handleDownloadAnalysis(path, fileName);
+      return;
+    }
+    handleDownload(path, fileName);
+  }, [handleDownload, handleDownloadAnalysis, isAnalysisPath]);
 
   // Loading state
   if (isLoading || !recording) {
@@ -331,7 +383,7 @@ export function RecordingDetailsPage() {
                   }
                 }
               }}
-              onDownload={handleDownload}
+              onDownload={handleContentDownload}
               compact={isMobile}
               isMobile={isMobile}
               isTinyScreen={isTinyScreen}
@@ -360,7 +412,7 @@ export function RecordingDetailsPage() {
               onDownloadAudio={isAudioURL(recording.file_path) ? () => handleDownload(recording.file_path, 'Audio') : undefined}
               onDownloadTranscription={recording.transcription_file_path ? () => handleDownload(recording.transcription_file_path, 'Transcription') : undefined}
               onDownloadAnalysis={recording.analysis_file_path || (recording.analysis_attempts && recording.analysis_attempts.length > 0)
-                ? (path, name) => handleDownload(path, name)
+                ? handleDownloadAnalysis
                 : undefined}
               analysisFilePath={recording.analysis_file_path}
               analysisAttempts={recording.analysis_attempts}

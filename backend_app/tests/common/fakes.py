@@ -570,6 +570,22 @@ class InMemoryBlobFake:
         
         # For testing, return mock extracted text
         return f"Mock extracted text from {blob_name}"
+
+    async def download_blob_bytes(self, blob_url: str) -> bytes:
+        """Download raw blob content."""
+        blob_name = self._extract_blob_name(blob_url)
+        if not blob_name:
+            raise ValueError(f"Invalid blob URL: {blob_url}")
+
+        async with self._lock:
+            content = self._blobs.get(blob_name)
+            if content is None:
+                raise FileNotFoundError(f"Blob not found: {blob_url}")
+            return content
+
+    async def generate_docx_bytes(self, analysis_text: str, add_title: bool = True) -> bytes:
+        """Generate mock DOCX bytes for tests."""
+        return f"MOCK_DOCX_CONTENT: {analysis_text}".encode("utf-8")
     
     async def generate_and_upload_docx(
         self, 

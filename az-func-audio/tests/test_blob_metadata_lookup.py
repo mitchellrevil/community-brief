@@ -523,7 +523,9 @@ class TestRaceConditionBlobFirstThenJob:
         # Verify: Processing continued to completion after job was found
         mock_transcription_service.submit_transcription_job.assert_called_once()
         mock_analysis_service.analyze_conversation.assert_called_once()
-        mock_storage_service.generate_and_upload_docx.assert_called_once()
+        assert mock_storage_service.upload_text.call_count >= 2
+        analysis_upload = mock_storage_service.upload_text.call_args_list[-1]
+        assert analysis_upload.kwargs["blob_name"].endswith("_analysis.md")
         
         # Verify: Job status was updated to COMPLETED
         final_status_call = mock_cosmos_service.update_job_status.call_args_list[-1]

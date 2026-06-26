@@ -534,6 +534,7 @@ class BlobProcessingService:
             analysis_text=analysis_result["analysis_text"],
             path_without_container=path_without_container,
             storage_service=storage_service,
+            config=config,
             job_id=job_id,
             correlation_id=correlation_id,
         )
@@ -611,6 +612,7 @@ class BlobProcessingService:
         analysis_text: str,
         path_without_container: str,
         storage_service,
+        config,
         job_id: str,
         correlation_id: str,
     ) -> str:
@@ -621,36 +623,27 @@ class BlobProcessingService:
         )
         tag = get_system_generated_tag()
         try:
-            docx_blob_url = storage_service.generate_and_upload_docx(
-                analysis_text,
-                f"{path_without_container}_{tag}_analysis.docx",
+            markdown_blob_url = storage_service.upload_text(
+                container_name=config.storage_recordings_container,
+                blob_name=f"{path_without_container}_{tag}_analysis.md",
+                text_content=analysis_text,
             )
             self.logger.debug(
-                "blob.analysis_document.docx_uploaded",
+                "blob.analysis_document.markdown_uploaded",
                 correlation_id=correlation_id,
                 job_id=job_id,
-                blob_url=redact(docx_blob_url, keep=60),
+                blob_url=redact(markdown_blob_url, keep=60),
             )
-            return docx_blob_url
-        except BLOB_PROCESSING_ERRORS as docx_error:
-            self.logger.warning(
-                "blob.analysis_document.docx_failed_pdf_fallback",
+            return markdown_blob_url
+        except BLOB_PROCESSING_ERRORS as upload_error:
+            self.logger.error(
+                "blob.analysis_document.markdown_upload_failed",
                 correlation_id=correlation_id,
                 job_id=job_id,
-                error=str(docx_error),
-                error_type=type(docx_error).__name__,
+                error=str(upload_error),
+                error_type=type(upload_error).__name__,
             )
-            pdf_blob_url = storage_service.generate_and_upload_pdf(
-                analysis_text,
-                f"{path_without_container}_{tag}_analysis.pdf",
-            )
-            self.logger.debug(
-                "blob.analysis_document.pdf_uploaded",
-                correlation_id=correlation_id,
-                job_id=job_id,
-                blob_url=redact(pdf_blob_url, keep=60),
-            )
-            return pdf_blob_url
+            raise
 
     @staticmethod
     def lookup_retry_settings(config) -> tuple[int, float]:

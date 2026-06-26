@@ -627,12 +627,11 @@ class StorageService:
             )
             raise
 
-    async def generate_and_upload_docx(self, analysis_text: str, blob_name: str, add_title: bool = True) -> str:
-        """Generate a DOCX from analysis text and upload to blob storage. Return the blob URL.
+    async def generate_docx_bytes(self, analysis_text: str, add_title: bool = True) -> bytes:
+        """Generate a DOCX from analysis text and return the bytes.
         
         Args:
             analysis_text: The text content to convert to DOCX
-            blob_name: The name/path for the blob in storage
             add_title: Whether to add "Analysis Report" title at the top (True for new, False for edited)
         """
         try:
@@ -716,8 +715,20 @@ class StorageService:
                 return buffer.getvalue()
 
             docx_content = await asyncio.to_thread(_generate_docx)
+            return docx_content
 
-            # Upload DOCX
+        except BLOB_SERVICE_ERRORS as e:
+            self.logger.error(
+                "blob_docx_generate_failed",
+                error=str(e),
+                error_type=type(e).__name__,
+            )
+            raise
+
+    async def generate_and_upload_docx(self, analysis_text: str, blob_name: str, add_title: bool = True) -> str:
+        """Generate a DOCX from analysis text and upload to blob storage. Return the blob URL."""
+        try:
+            docx_content = await self.generate_docx_bytes(analysis_text, add_title=add_title)
             container_client = self.blob_service_client.get_container_client(
                 self.config.azure_storage_recordings_container
             )

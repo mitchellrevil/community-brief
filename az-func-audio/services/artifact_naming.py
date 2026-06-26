@@ -18,7 +18,7 @@ def is_system_generated_file(blob_name: str) -> bool:
 def is_reprocess_artifact(blob_path: str) -> bool:
     blob_path_lower = blob_path.lower()
     has_reprocess_pattern = "_reprocess_" in blob_path_lower or "analysis" in blob_path_lower
-    is_analysis_format = blob_path_lower.endswith((".docx", ".pdf"))
+    is_analysis_format = blob_path_lower.endswith((".docx", ".pdf", ".md"))
     return has_reprocess_pattern and is_analysis_format
 
 
@@ -36,5 +36,5 @@ def build_analysis_blob_name(blob_url: str) -> str:
     tag = get_system_generated_tag()
     timestamp = datetime.now(UTC).strftime("%Y%m%d%H%M%S")
     suffix = uuid.uuid4().hex[:8]
-    new_filename = f"{base}{tag}_reprocess_{timestamp}_{suffix}.docx"
+    new_filename = f"{base}{tag}_reprocess_{timestamp}_{suffix}.md"
     return f"{folder}/{new_filename}" if folder else new_filename

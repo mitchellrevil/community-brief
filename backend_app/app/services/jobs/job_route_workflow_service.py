@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 from ...core.errors.domain import PermissionError, ResourceNotFoundError, ResourceNotReadyError, ValidationError
 from ...services.interfaces import StorageServiceInterface
@@ -13,6 +14,9 @@ from .job_service import JobService
 
 
 _jobs_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
+
+DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+PDF_MEDIA_TYPE = "application/pdf"
 
 
 async def invalidate_job_list_cache() -> None:
@@ -114,6 +118,64 @@ class JobRouteWorkflowService:
             raise ResourceNotFoundError("Transcription blob not available", transcription_url)
         return text
 
+    async def get_analysis_document(
+        self,
+        *,
+        job_id: str,
+        current_user: Dict[str, Any],
+        analysis_file_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        job_service = self._job_service()
+        storage_service = self._storage_service()
+        job = await job_service.get_job(job_id)
+        if not job:
+            raise ResourceNotFoundError("Job", job_id)
+        if not check_job_access(job, current_user, "view"):
+            raise PermissionError("Access denied to job")
+
+        source_path = _resolve_analysis_path(job, analysis_file_path)
+        if not source_path:
+            raise ResourceNotReadyError(
+                "Analysis not available for job",
+                {"job_id": job_id, "job_status": job.get("status")},
+            )
+
+        extension = _path_extension(source_path)
+        if extension in {".md", ".txt"}:
+            text = await storage_service.download_text_from_blob(source_path)
+            if text is None:
+                raise ResourceNotFoundError("Analysis blob not available", _strip_url_query(source_path))
+            content = await storage_service.generate_docx_bytes(text, add_title=False)
+            return {
+                "content": content,
+                "filename": _download_filename(source_path, ".docx"),
+                "media_type": DOCX_MEDIA_TYPE,
+            }
+
+        if extension == ".docx":
+            try:
+                content = await storage_service.download_blob_bytes(source_path)
+            except FileNotFoundError as exc:
+                raise ResourceNotFoundError("Analysis blob not available", _strip_url_query(source_path)) from exc
+            return {
+                "content": content,
+                "filename": _download_filename(source_path, ".docx"),
+                "media_type": DOCX_MEDIA_TYPE,
+            }
+
+        if extension == ".pdf":
+            try:
+                content = await storage_service.download_blob_bytes(source_path)
+            except FileNotFoundError as exc:
+                raise ResourceNotFoundError("Analysis blob not available", _strip_url_query(source_path)) from exc
+            return {
+                "content": content,
+                "filename": _download_filename(source_path, ".pdf"),
+                "media_type": PDF_MEDIA_TYPE,
+            }
+
+        raise ValidationError("Unsupported analysis document format")
+
     async def update_job_display_name(
         self,
         *,
@@ -207,6 +269,59 @@ def _parse_created_at_filter(value: Optional[str], *, end_of_day: bool) -> Optio
         return parsed.isoformat()
     except ValueError as exc:
         raise ValidationError("Invalid date format for created_at_start or created_at_end") from exc
+
+
+def _resolve_analysis_path(job: Dict[str, Any], requested_path: Optional[str]) -> Optional[str]:
+    allowed_paths: dict[str, str] = {}
+
+    def add_allowed(path: Optional[str]) -> None:
+        if path:
+            allowed_paths[_strip_url_query(path)] = path
+
+    add_allowed(job.get("analysis_file_path"))
+    attempts = job.get("analysis_attempts")
+    if isinstance(attempts, list):
+        for attempt in attempts:
+            if isinstance(attempt, dict):
+                add_allowed(attempt.get("analysis_file_path"))
+
+    if requested_path:
+        requested_key = _strip_url_query(requested_path)
+        if requested_key not in allowed_paths:
+            raise PermissionError("Access denied to analysis document")
+        return allowed_paths[requested_key]
+
+    if job.get("analysis_file_path"):
+        return job["analysis_file_path"]
+
+    if isinstance(attempts, list) and attempts:
+        for attempt in reversed(attempts):
+            if isinstance(attempt, dict) and attempt.get("analysis_file_path"):
+                return attempt["analysis_file_path"]
+
+    return None
+
+
+def _strip_url_query(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme and parsed.netloc:
+        return parsed._replace(query="", fragment="").geturl()
+    return value.split("?", 1)[0].split("#", 1)[0]
+
+
+def _path_extension(value: str) -> str:
+    path = urlparse(value).path or value
+    filename = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
+    if "." not in filename:
+        return ""
+    return f".{filename.rsplit('.', 1)[-1].lower()}"
+
+
+def _download_filename(source_path: str, output_extension: str) -> str:
+    path = urlparse(source_path).path or source_path
+    filename = path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1] or "analysis"
+    stem = filename.rsplit(".", 1)[0] if "." in filename else filename
+    return f"{stem}{output_extension}"
 
 
 def _raise_for_management_error(result: Dict[str, Any], *, default_message: str) -> None:
