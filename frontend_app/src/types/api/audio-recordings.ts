@@ -73,6 +73,7 @@ export interface AudioRecording {
   message?: string;
   shared_by_name?: string;
   shared_with_count?: number;
+  shared_with?: Array<SharedUserInfo>;
 }
 
 /**

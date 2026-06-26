@@ -5,76 +5,106 @@ import { e2eId } from './utils/ids';
 import { frontendBaseURL, getCredentialsByRole, storageStatePath } from './utils/config';
 import {
   createJobViaUpload,
+  shareJobApi,
   softDeleteJobApi,
   unshareJobApi,
 } from './utils/jobs';
 
-async function gotoSharedFiles(page: any) {
-  await page.goto(`${frontendBaseURL}/audio-recordings/shared`, { waitUntil: 'domcontentloaded' });
-  await ensureBusinessUnitAssigned(page, { preferredName: 'Childrens Services' });
-  await expect(page.getByRole('heading', { name: 'Shared files' })).toBeVisible({ timeout: 20_000 });
-}
-
-test.describe('Share dialog', () => {
-  test('owner can share via UI dialog and recipient sees it in Shared files', async ({ browser }) => {
+test.describe('Manage access dialog', () => {
+  test('owner can add, update, and remove access in one modal', async ({ browser }) => {
     test.setTimeout(240_000);
 
     const creds = await getCredentialsByRole();
-
     const ownerCtx = await browser.newContext({ storageState: storageStatePath('user') });
-    const recipientCtx = await browser.newContext({ storageState: storageStatePath('editor') });
-
     const ownerPage = await ownerCtx.newPage();
-    const recipientPage = await recipientCtx.newPage();
-
-    const filename = `e2e-share-ui-${e2eId('job')}.txt`;
+    const filename = `e2e-manage-access-${e2eId('job')}.txt`;
     const job = await createJobViaUpload(ownerPage.request, { filename });
 
     try {
-      // Open details page as owner.
       await ownerPage.goto(`${frontendBaseURL}/audio-recordings/${job.id}`, { waitUntil: 'domcontentloaded' });
       await ensureBusinessUnitAssigned(ownerPage, { preferredName: 'Childrens Services' });
 
-      // Open share dialog.
       await ownerPage.getByRole('button', { name: /Share Recording|Manage Sharing/ }).click();
       const dialog = ownerPage.getByRole('dialog');
-      await expect(dialog.getByRole('heading', { name: 'Share Recording' })).toBeVisible({ timeout: 15_000 });
+      await expect(dialog.getByRole('heading', { name: 'Manage Access' })).toBeVisible({ timeout: 15_000 });
 
-      // Select user from search popover.
       await dialog.getByRole('combobox', { name: 'User' }).click();
       await dialog.getByPlaceholder('Search users by email or name...').fill(creds.editor.email);
       await dialog.getByText(creds.editor.email, { exact: true }).first().click({ timeout: 20_000 });
 
-      // Choose permission level: Edit.
-      await dialog.getByRole('combobox', { name: 'Permission Level' }).click();
-      await expect(ownerPage.getByRole('listbox')).toBeVisible({ timeout: 10_000 });
-      await ownerPage.getByRole('option', { name: /Edit/i }).click({ timeout: 20_000 });
+      await dialog.getByRole('combobox', { name: 'Permission' }).click();
+      await ownerPage.getByRole('option', { name: /^Edit$/i }).click({ timeout: 20_000 });
+      await dialog.getByPlaceholder('Add an optional message...').fill('E2E manage access');
 
-      // Add a message.
-      await dialog.getByPlaceholder('Add a message for the recipient...').fill('E2E share via UI');
+      const addReq = ownerPage.waitForResponse((res) =>
+        res.request().method() === 'POST' && /\/api\/v1\/jobs\/.+\/share/.test(res.url()) && res.ok(),
+      );
+      await dialog.getByRole('button', { name: 'Add access' }).click();
+      await addReq;
+      await expect(dialog.getByText(creds.editor.email, { exact: true })).toBeVisible({ timeout: 20_000 });
 
-      // Share.
-      const shareReq = ownerPage.waitForResponse((res) => res.request().method() === 'POST' && /\/api\/v1\/jobs\/.+\/share/.test(res.url()) && res.ok(), { timeout: 30_000 });
-      await dialog.getByRole('button', { name: /^Share$/ }).click();
-      await shareReq;
+      const updateReq = ownerPage.waitForResponse((res) =>
+        res.request().method() === 'POST' && /\/api\/v1\/jobs\/.+\/share/.test(res.url()) && res.ok(),
+      );
+      await dialog.getByRole('combobox', { name: `Permission for ${creds.editor.email}` }).click();
+      await ownerPage.getByRole('option', { name: /^View/i }).click({ timeout: 20_000 });
+      await updateReq;
+      await expect(dialog.getByRole('combobox', { name: `Permission for ${creds.editor.email}` })).toContainText('View');
 
-      // Recipient sees the job in Shared files.
-      await gotoSharedFiles(recipientPage);
-      await expect(recipientPage.getByText(filename).first()).toBeVisible({ timeout: 30_000 });
-      await expect(recipientPage.getByText('Editor').first()).toBeVisible({ timeout: 30_000 });
-
-      // Recipient can open it.
-      const sharedCard = recipientPage.getByText(filename).first().locator('xpath=ancestor::div[contains(@class,"group")][1]');
-      await sharedCard.getByRole('link', { name: /Open/i }).click();
-      await expect(recipientPage).toHaveURL(new RegExp(`/audio-recordings/${job.id}`));
-      await expect(recipientPage.getByRole('button', { name: 'Logout' })).toBeVisible({ timeout: 20_000 });
+      const removeReq = ownerPage.waitForResponse((res) =>
+        res.request().method() === 'DELETE' && /\/api\/v1\/jobs\/.+\/share\//.test(res.url()) && res.ok(),
+      );
+      await dialog.getByRole('button', { name: `Remove access for ${creds.editor.email}` }).click();
+      await ownerPage.getByRole('alertdialog').getByRole('button', { name: 'Remove Access' }).click();
+      await removeReq;
+      await expect(dialog.getByText(creds.editor.email, { exact: true })).toHaveCount(0);
     } finally {
-      // Cleanup via API (best-effort).
       await unshareJobApi(ownerPage.request, job.id, creds.editor.email).catch(() => {});
       await softDeleteJobApi(ownerPage.request, job.id).catch(() => {});
-
       await ownerCtx.close();
-      await recipientCtx.close();
+    }
+  });
+
+  test('shared admin can manage access from the job page', async ({ browser }) => {
+    test.setTimeout(240_000);
+
+    const creds = await getCredentialsByRole();
+    const ownerCtx = await browser.newContext({ storageState: storageStatePath('user') });
+    const managerCtx = await browser.newContext({ storageState: storageStatePath('editor') });
+    const ownerPage = await ownerCtx.newPage();
+    const managerPage = await managerCtx.newPage();
+    const filename = `e2e-shared-admin-access-${e2eId('job')}.txt`;
+    const job = await createJobViaUpload(ownerPage.request, { filename });
+
+    try {
+      await shareJobApi(ownerPage.request, job.id, {
+        shared_user_email: creds.editor.email,
+        permission_level: 'admin',
+      });
+
+      await managerPage.goto(`${frontendBaseURL}/audio-recordings/${job.id}`, { waitUntil: 'domcontentloaded' });
+      await ensureBusinessUnitAssigned(managerPage, { preferredName: 'Childrens Services' });
+      await managerPage.getByRole('button', { name: /Manage Sharing/ }).click();
+
+      const dialog = managerPage.getByRole('dialog');
+      await expect(dialog.getByRole('heading', { name: 'Manage Access' })).toBeVisible({ timeout: 15_000 });
+
+      await dialog.getByRole('combobox', { name: 'User' }).click();
+      await dialog.getByPlaceholder('Search users by email or name...').fill(creds.admin.email);
+      await dialog.getByText(creds.admin.email, { exact: true }).first().click({ timeout: 20_000 });
+
+      const addReq = managerPage.waitForResponse((res) =>
+        res.request().method() === 'POST' && /\/api\/v1\/jobs\/.+\/share/.test(res.url()) && res.ok(),
+      );
+      await dialog.getByRole('button', { name: 'Add access' }).click();
+      await addReq;
+      await expect(dialog.getByText(creds.admin.email, { exact: true })).toBeVisible({ timeout: 20_000 });
+    } finally {
+      await unshareJobApi(ownerPage.request, job.id, creds.admin.email).catch(() => {});
+      await unshareJobApi(ownerPage.request, job.id, creds.editor.email).catch(() => {});
+      await softDeleteJobApi(ownerPage.request, job.id).catch(() => {});
+      await ownerCtx.close();
+      await managerCtx.close();
     }
   });
 });

@@ -36,7 +36,7 @@ class JobSharingService:
             if not job:
                 return {"status": "error", "message": "Job not found"}
 
-            if job.get("user_id") != owner_user_id:
+            if not _can_manage_sharing(job, owner_user_id):
                 return {"status": "error", "message": "Access denied: not job owner"}
 
             target_user = await self.user_repository.get_by_email(target_user_email)
@@ -116,9 +116,11 @@ class JobSharingService:
                     error_type=type(e).__name__,
                 )
             try:
-                await _shared_jobs_cache.invalidate(f"shared:{owner_user_id}")
-                if target_user:
-                    await _shared_jobs_cache.invalidate(f"shared:{target_user['id']}")
+                await _invalidate_shared_jobs_cache_for(
+                    owner_user_id,
+                    job.get("user_id"),
+                    target_user["id"] if target_user else None,
+                )
             except JOB_SHARING_ERRORS as e:
                 logger.debug(
                     "job_sharing.shared_jobs_cache_invalidation_failed",
@@ -209,12 +211,16 @@ class JobSharingService:
                 return {"status": "error", "message": "Job not found"}
             
             # Verify ownership
-            if job.get("user_id") != owner_user_id:
+            if not _can_manage_sharing(job, owner_user_id):
                 return {"status": "error", "message": "Access denied: not job owner"}
             
             # Remove share if exists
             if "shared_with" in job:
                 original_count = len(job["shared_with"])
+                removed_share = next(
+                    (share for share in job["shared_with"] if share.get("user_email") == target_user_email),
+                    None,
+                )
                 job["shared_with"] = [
                     share for share in job["shared_with"] 
                     if share.get("user_email") != target_user_email
@@ -234,7 +240,11 @@ class JobSharingService:
                             error_type=type(exc).__name__,
                         )
                     try:
-                        await _shared_jobs_cache.invalidate(f"shared:{owner_user_id}")
+                        await _invalidate_shared_jobs_cache_for(
+                            owner_user_id,
+                            job.get("user_id"),
+                            removed_share.get("user_id") if removed_share else None,
+                        )
                     except JOB_SHARING_ERRORS as exc:
                         logger.debug(
                             "job_sharing.shared_jobs_cache_invalidation_failed",
@@ -529,6 +539,20 @@ class JobSharingService:
 
     def close(self):
         logger.info("job_sharing.close")
+
+
+def _can_manage_sharing(job: Dict[str, Any], user_id: str) -> bool:
+    if job.get("user_id") == user_id:
+        return True
+    return any(
+        share.get("user_id") == user_id and share.get("permission_level") == "admin"
+        for share in job.get("shared_with") or []
+    )
+
+
+async def _invalidate_shared_jobs_cache_for(*user_ids: Optional[str]) -> None:
+    for user_id in {candidate for candidate in user_ids if candidate}:
+        await _shared_jobs_cache.invalidate(f"shared:{user_id}")
 
 
 async def invalidate_job_cache(job_id: str):

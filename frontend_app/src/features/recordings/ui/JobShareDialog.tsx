@@ -1,39 +1,40 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { z } from "zod";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertCircle, Check, ChevronsUpDown, Loader2, Share2, User } from "lucide-react";
-import { useRouter } from "@tanstack/react-router";
+import {
+  AlertCircle,
+  Check,
+  ChevronsUpDown,
+  Copy,
+  Eye,
+  Loader2,
+  Shield,
+  User,
+  UserMinus,
+  Users,
+} from "lucide-react";
+import type { SharedUserInfo } from "@/types/api";
 import { announcementKeys } from "@/features/announcements/data/keys";
 import { useUserSearch } from "@/features/users/data/hooks";
-import { shareJob } from "@/features/recordings/data/api";
+import { getJobSharingInfo, shareJob, unshareJob } from "@/features/recordings/data/api";
 import { recordingsKeys } from "@/features/recordings/data/keys";
 import { sharingToasts } from "@/lib/toast-utils";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Form,
-  FormControl,
-  FormDescription,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Command,
   CommandEmpty,
@@ -43,13 +44,43 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Form,
+  FormControl,
+  FormField,
+  FormItem,
+  FormLabel,
+  FormMessage,
+} from "@/components/ui/form";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
-import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+
+const permissionOptions = [
+  { value: "view", label: "View", description: "Can view transcriptions and analysis" },
+  { value: "edit", label: "Edit", description: "Can view and edit content" },
+  { value: "admin", label: "Admin", description: "Can manage sharing" },
+] as const;
+
+type PermissionLevel = (typeof permissionOptions)[number]["value"];
 
 const jobShareSchema = z.object({
   shared_user_email: z.string().email("Please enter a valid email address"),
@@ -75,12 +106,9 @@ export function JobShareDialog({
   jobTitle = "Recording",
 }: JobShareDialogProps) {
   const queryClient = useQueryClient();
-  const [isSubmitting, setIsSubmitting] = useState(false);
   const [userSearchOpen, setUserSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
-  // Local input state to debounce typing before triggering network requests
   const [inputValue, setInputValue] = useState("");
-  const router = useRouter();
 
   const form = useForm<JobShareFormData>({
     resolver: zodResolver(jobShareSchema),
@@ -91,321 +119,489 @@ export function JobShareDialog({
     },
   });
 
-  // Infinite query for user search with pagination (centralized)
+  const {
+    data: sharingInfo,
+    isLoading: isLoadingSharing,
+    error: sharingError,
+  } = useQuery({
+    queryKey: recordingsKeys.jobSharingInfo(jobId),
+    queryFn: () => getJobSharingInfo(jobId),
+    enabled: isOpen && Boolean(jobId),
+    staleTime: 30000,
+  });
+
   const {
     data: userSearchData,
     fetchNextPage,
     hasNextPage,
     isFetchingNextPage,
     isLoading: isLoadingUsers,
-  } = useUserSearch(searchQuery, isOpen);
+  } = useUserSearch(searchQuery, isOpen && userSearchOpen);
 
-  // Flatten paginated results
   const allUsers = userSearchData?.pages.flatMap((page) => page.users) || [];
+  const sharedWith = sharingInfo?.shared_with ?? [];
+  const canManageAccess = Boolean(sharingInfo?.is_owner || sharingInfo?.user_permission === "admin");
+  const isBusy = isLoadingSharing;
 
-  // Handle scroll to load more
-  const handleScroll = useCallback(
-    (e: React.UIEvent<HTMLDivElement>) => {
-      const bottom =
-        e.currentTarget.scrollHeight - e.currentTarget.scrollTop <=
-        e.currentTarget.clientHeight + 50;
-
-      if (bottom && hasNextPage && !isFetchingNextPage) {
-        fetchNextPage();
+  const invalidateAccessQueries = useCallback(
+    (includeAnnouncements = false) => {
+      queryClient.invalidateQueries({ queryKey: recordingsKeys.jobSharingInfo(jobId) });
+      queryClient.invalidateQueries({ queryKey: recordingsKeys.single(jobId) });
+      queryClient.invalidateQueries({ queryKey: recordingsKeys.sharedJobs() });
+      queryClient.invalidateQueries({ queryKey: recordingsKeys.base() });
+      if (includeAnnouncements) {
+        queryClient.invalidateQueries({ queryKey: announcementKeys.list() });
       }
     },
-    [hasNextPage, isFetchingNextPage, fetchNextPage]
+    [jobId, queryClient],
   );
 
   const shareJobMutation = useMutation({
     mutationFn: (data: JobShareFormData) => shareJob(jobId, data),
     onSuccess: (_, variables) => {
-      // Copy share link to clipboard helper
-      const copyShareLink = async () => {
-        const shareUrl = `${window.location.origin}/audio-recordings/${jobId}`;
-        try {
-          await navigator.clipboard.writeText(shareUrl);
-          sharingToasts.linkCopied();
-        } catch (err) {
-          toast.error("Failed to copy link");
-        }
-      };
-
-      sharingToasts.granted(variables.shared_user_email, jobTitle, {
-        onView: () => {
-          onOpenChange(false);
-          // Navigate to the recording details page (showing sharing info)
-          try {
-            router.navigate({
-              to: "/audio-recordings/$id",
-              params: { id: jobId },
-              search: { tab: "sharing" },
-            });
-          } catch (e) {
-            // Fallback
-            window.location.href = `/audio-recordings/${jobId}`;
-          }
-        },
-        onCopyLink: copyShareLink,
-      });
-
-      // Invalidate all relevant caches to ensure fresh data
-      queryClient.invalidateQueries({ queryKey: recordingsKeys.jobSharingInfo(jobId) });
-      queryClient.invalidateQueries({ queryKey: recordingsKeys.single(jobId) });
-      queryClient.invalidateQueries({ queryKey: recordingsKeys.sharedJobs() });
-      queryClient.invalidateQueries({ queryKey: recordingsKeys.base() });
-      // Refresh announcements so recipients (or the sharer) see new share announcements quickly
-      queryClient.invalidateQueries({ queryKey: announcementKeys.list() });
+      invalidateAccessQueries(true);
+      sharingToasts.granted(variables.shared_user_email, jobTitle);
       form.reset();
       setSearchQuery("");
       setInputValue("");
-      onOpenChange(false);
     },
     onError: (error, variables) => {
       sharingToasts.failed(variables.shared_user_email, error.message, {
-        onRetry: () => {
-          shareJobMutation.mutate(form.getValues());
-        },
-        onViewDetails: () => {
-          console.error("Share error details:", error);
-          toast.error("Error details logged to console");
-        },
+        onRetry: () => shareJobMutation.mutate(form.getValues()),
       });
     },
   });
 
-  const handleSubmit = async (data: JobShareFormData) => {
-    setIsSubmitting(true);
+  const updatePermissionMutation = useMutation({
+    mutationFn: (data: { userEmail: string; permissionLevel: PermissionLevel }) =>
+      shareJob(jobId, {
+        shared_user_email: data.userEmail,
+        permission_level: data.permissionLevel,
+      }),
+    onSuccess: (_, variables) => {
+      invalidateAccessQueries(true);
+      toast.success(`Permission updated for ${variables.userEmail}`);
+    },
+    onError: (error, variables) => {
+      sharingToasts.failed(variables.userEmail, error.message, {
+        onRetry: () => updatePermissionMutation.mutate(variables),
+      });
+    },
+  });
+
+  const removeAccessMutation = useMutation({
+    mutationFn: (userEmail: string) => unshareJob(jobId, userEmail),
+    onSuccess: (_, userEmail) => {
+      invalidateAccessQueries();
+      sharingToasts.revoked(userEmail);
+    },
+    onError: (error, userEmail) => {
+      sharingToasts.failed(userEmail, error.message, {
+        onRetry: () => removeAccessMutation.mutate(userEmail),
+      });
+    },
+  });
+
+  const handleScroll = useCallback(
+    (event: React.UIEvent<HTMLDivElement>) => {
+      const bottom =
+        event.currentTarget.scrollHeight - event.currentTarget.scrollTop <=
+        event.currentTarget.clientHeight + 50;
+
+      if (bottom && hasNextPage && !isFetchingNextPage) {
+        fetchNextPage();
+      }
+    },
+    [fetchNextPage, hasNextPage, isFetchingNextPage],
+  );
+
+  const handleCopyLink = async () => {
     try {
-      await shareJobMutation.mutateAsync(data);
-    } catch (error) {
-      // Error is handled by the mutation
-    } finally {
-      setIsSubmitting(false);
+      await navigator.clipboard.writeText(`${window.location.origin}/audio-recordings/${jobId}`);
+      sharingToasts.linkCopied();
+    } catch {
+      toast.error("Failed to copy link");
     }
   };
 
-  // Debounce the search input so we don't fire requests on every keystroke
-  useEffect(() => {
-    const t = setTimeout(() => {
-      setSearchQuery(inputValue.trim());
-    }, 1000);
-    return () => clearTimeout(t);
-  }, [inputValue]);
-
-  const permissionDescriptions = {
-    view: "Can view transcriptions and analysis results",
-    edit: "Can view and edit transcription content",
-    admin: "Full access including sharing permissions",
+  const handlePermissionChange = (
+    share: SharedUserInfo,
+    permissionLevel: PermissionLevel,
+  ) => {
+    if (share.permission_level === permissionLevel) return;
+    updatePermissionMutation.mutate({
+      userEmail: share.user_email,
+      permissionLevel,
+    });
   };
 
-  const permissionLevel = form.watch("permission_level");
+  const accessError = useMemo(() => {
+    if (!sharingError) return null;
+    return sharingError instanceof Error ? sharingError.message : "Unable to load access";
+  }, [sharingError]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearchQuery(inputValue.trim());
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [inputValue]);
+
+  useEffect(() => {
+    if (isOpen) return;
+    form.reset();
+    setSearchQuery("");
+    setInputValue("");
+    setUserSearchOpen(false);
+  }, [form, isOpen]);
 
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <Share2 className="h-5 w-5 text-primary" />
-            Share Recording
+            <Users className="h-5 w-5 text-primary" />
+            Manage Access
           </DialogTitle>
           <DialogDescription>
-            Share "{jobTitle}" with another user and set their permission level.
+            Manage who can open "{jobTitle}" and what they can do.
           </DialogDescription>
         </DialogHeader>
 
-        <Form {...form}>
-          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
-            <FormField
-              control={form.control}
-              name="shared_user_email"
-              render={({ field }) => (
-                <FormItem className="flex flex-col">
-                  <FormLabel>User</FormLabel>
-                  <Popover open={userSearchOpen} onOpenChange={setUserSearchOpen}>
-                    <PopoverTrigger asChild>
-                      <FormControl>
-                        <Button
-                          variant="outline"
-                          role="combobox"
-                          aria-expanded={userSearchOpen}
-                          className={cn(
-                            "w-full justify-between",
-                            !field.value && "text-muted-foreground"
-                          )}
-                          disabled={isSubmitting}
-                        >
-                          {field.value || "Select a user..."}
-                          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                        </Button>
-                      </FormControl>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-[min(92vw,26rem)] p-0" align="start">
-                      <Command shouldFilter={false}>
-                        <CommandInput
-                          placeholder="Search users by email or name..."
-                          value={inputValue}
-                          onValueChange={setInputValue}
-                        />
-                        <CommandList onScroll={handleScroll}>
-                          <CommandEmpty>
-                            {isLoadingUsers ? "Loading users..." : "No users found."}
-                          </CommandEmpty>
-                          <CommandGroup>
-                            {allUsers.map((user) => (
-                              <CommandItem
-                                key={user.id}
-                                value={user.email}
-                                onSelect={(currentValue) => {
-                                  form.setValue("shared_user_email", currentValue);
-                                  setUserSearchOpen(false);
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    field.value === user.email
-                                      ? "opacity-100"
-                                      : "opacity-0"
-                                  )}
-                                />
-                                <User className="mr-2 h-4 w-4 text-muted-foreground" />
-                                <div className="flex flex-col">
-                                  <span className="font-medium">{user.email}</span>
-                                  {user.name && (
-                                    <span className="text-xs text-muted-foreground">
-                                      {user.name}
-                                    </span>
-                                  )}
-                                </div>
-                              </CommandItem>
-                            ))}
-                            {isFetchingNextPage && (
-                              <div className="flex items-center justify-center py-2">
-                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                              </div>
-                            )}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
-                  <FormDescription>
-                    Search and select a user to share this recording with.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="permission_level"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Permission Level</FormLabel>
-                  <Select
-                    onValueChange={field.onChange}
-                    value={field.value}
-                    disabled={isSubmitting}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select permission level" />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="view">
-                        <div className="flex flex-col items-start">
-                          <span className="font-medium">View</span>
-                          <span className="text-xs text-muted-foreground">
-                            Can view transcriptions and analysis
-                          </span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="edit">
-                        <div className="flex flex-col items-start">
-                          <span className="font-medium">Edit</span>
-                          <span className="text-xs text-muted-foreground">
-                            Can view and edit content
-                          </span>
-                        </div>
-                      </SelectItem>
-                      <SelectItem value="admin">
-                        <div className="flex flex-col items-start">
-                          <span className="font-medium">Admin</span>
-                          <span className="text-xs text-muted-foreground">
-                            Full access including sharing
-                          </span>
-                        </div>
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormDescription>{permissionDescriptions[permissionLevel]}</FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <FormField
-              control={form.control}
-              name="message"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Message (Optional)</FormLabel>
-                  <FormControl>
-                    <Textarea
-                      placeholder="Add a message for the recipient..."
-                      className="resize-none"
-                      rows={3}
-                      {...field}
-                      disabled={isSubmitting}
-                    />
-                  </FormControl>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-
-            <div className="flex items-center gap-3 pt-2">
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => onOpenChange(false)}
-                disabled={isSubmitting}
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-              <Button type="submit" disabled={isSubmitting} className="flex-1">
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Sharing...
-                  </>
-                ) : (
-                  <>
-                    <Share2 className="mr-2 h-4 w-4" />
-                    Share
-                  </>
-                )}
-              </Button>
+        <div className="space-y-5">
+          <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">Recording link</p>
+              <p className="truncate text-xs text-muted-foreground">
+                {typeof window !== "undefined" ? `${window.location.origin}/audio-recordings/${jobId}` : jobId}
+              </p>
             </div>
-          </form>
-        </Form>
-
-        {shareJobMutation.error && (
-          <div className="mt-4 p-3 bg-destructive/10 text-destructive rounded-md flex items-start gap-2 text-sm" role="alert" aria-live="assertive">
-            <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" aria-hidden="true" />
-            <div>
-              <p className="font-medium">Sharing failed</p>
-              <p>{shareJobMutation.error.message}</p>
-            </div>
+            <Button type="button" variant="outline" onClick={handleCopyLink} className="shrink-0">
+              <Copy className="mr-2 h-4 w-4" />
+              Copy link
+            </Button>
           </div>
-        )}
+
+          {canManageAccess && (
+            <Form {...form}>
+              <form
+                onSubmit={form.handleSubmit((data) => shareJobMutation.mutate(data))}
+                className="space-y-3 rounded-md border p-3"
+              >
+                <div className="grid gap-3 sm:grid-cols-[1fr_9rem]">
+                  <FormField
+                    control={form.control}
+                    name="shared_user_email"
+                    render={({ field }) => (
+                      <FormItem className="flex flex-col">
+                        <FormLabel>User</FormLabel>
+                        <Popover open={userSearchOpen} onOpenChange={setUserSearchOpen}>
+                          <PopoverTrigger asChild>
+                            <FormControl>
+                              <Button
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={userSearchOpen}
+                                className={cn(
+                                  "w-full justify-between",
+                                  !field.value && "text-muted-foreground",
+                                )}
+                                disabled={shareJobMutation.isPending}
+                              >
+                                <span className="truncate">{field.value || "Select a user..."}</span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </FormControl>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-[min(92vw,26rem)] p-0" align="start">
+                            <Command shouldFilter={false}>
+                              <CommandInput
+                                placeholder="Search users by email or name..."
+                                value={inputValue}
+                                onValueChange={setInputValue}
+                              />
+                              <CommandList onScroll={handleScroll}>
+                                <CommandEmpty>
+                                  {isLoadingUsers ? "Loading users..." : "No users found."}
+                                </CommandEmpty>
+                                <CommandGroup>
+                                  {allUsers.map((user) => (
+                                    <CommandItem
+                                      key={user.id}
+                                      value={user.email}
+                                      onSelect={(currentValue) => {
+                                        form.setValue("shared_user_email", currentValue, {
+                                          shouldValidate: true,
+                                        });
+                                        setUserSearchOpen(false);
+                                      }}
+                                    >
+                                      <Check
+                                        className={cn(
+                                          "mr-2 h-4 w-4",
+                                          field.value === user.email ? "opacity-100" : "opacity-0",
+                                        )}
+                                      />
+                                      <User className="mr-2 h-4 w-4 text-muted-foreground" />
+                                      <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium">{user.email}</p>
+                                        {user.name && (
+                                          <p className="truncate text-xs text-muted-foreground">
+                                            {user.name}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </CommandItem>
+                                  ))}
+                                  {isFetchingNextPage && (
+                                    <div className="flex items-center justify-center py-2">
+                                      <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                    </div>
+                                  )}
+                                </CommandGroup>
+                              </CommandList>
+                            </Command>
+                          </PopoverContent>
+                        </Popover>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+
+                  <FormField
+                    control={form.control}
+                    name="permission_level"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Permission</FormLabel>
+                        <Select
+                          value={field.value}
+                          onValueChange={field.onChange}
+                          disabled={shareJobMutation.isPending}
+                        >
+                          <FormControl>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {permissionOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                </div>
+
+                <FormField
+                  control={form.control}
+                  name="message"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Message</FormLabel>
+                      <FormControl>
+                        <Textarea
+                          placeholder="Add an optional message..."
+                          rows={2}
+                          className="resize-none"
+                          disabled={shareJobMutation.isPending}
+                          {...field}
+                        />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+
+                <div className="flex justify-end">
+                  <Button type="submit" disabled={shareJobMutation.isPending}>
+                    {shareJobMutation.isPending && (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    )}
+                    Add access
+                  </Button>
+                </div>
+              </form>
+            </Form>
+          )}
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">People with access</h3>
+              {sharingInfo && (
+                <Badge variant="secondary">
+                  {sharingInfo.total_shares} shared
+                </Badge>
+              )}
+            </div>
+
+            {isBusy && (
+              <div className="flex items-center justify-center rounded-md border p-6">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+              </div>
+            )}
+
+            {accessError && (
+              <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p>{accessError}</p>
+              </div>
+            )}
+
+            {!isBusy && !accessError && (
+              <div className="space-y-2">
+                {sharingInfo?.is_owner && (
+                  <div className="flex items-center gap-3 rounded-md border p-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
+                      <Shield className="h-4 w-4 text-muted-foreground" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-medium">You</p>
+                      <p className="text-xs text-muted-foreground">Owner</p>
+                    </div>
+                    <Badge>Owner</Badge>
+                  </div>
+                )}
+
+                {sharedWith.map((share) => (
+                  <AccessRow
+                    key={share.user_id || share.user_email}
+                    share={share}
+                    canManageAccess={canManageAccess}
+                    isUpdating={updatePermissionMutation.isPending}
+                    isRemoving={removeAccessMutation.isPending}
+                    onPermissionChange={handlePermissionChange}
+                    onRemove={(email) => removeAccessMutation.mutate(email)}
+                  />
+                ))}
+
+                {!sharingInfo?.is_owner && sharedWith.length === 0 && (
+                  <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
+                    No shared users found.
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Done
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
+function AccessRow({
+  share,
+  canManageAccess,
+  isUpdating,
+  isRemoving,
+  onPermissionChange,
+  onRemove,
+}: {
+  share: SharedUserInfo;
+  canManageAccess: boolean;
+  isUpdating: boolean;
+  isRemoving: boolean;
+  onPermissionChange: (share: SharedUserInfo, permissionLevel: PermissionLevel) => void;
+  onRemove: (email: string) => void;
+}) {
+  const currentPermission = permissionOptions.some((option) => option.value === share.permission_level)
+    ? (share.permission_level as PermissionLevel)
+    : "view";
+  const Icon = currentPermission === "admin" ? Shield : Eye;
 
+  return (
+    <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+        </div>
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{share.user_email}</p>
+          {share.message && (
+            <p className="truncate text-xs text-muted-foreground">{share.message}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 sm:justify-end">
+        {canManageAccess ? (
+          <Select
+            value={currentPermission}
+            onValueChange={(value) => onPermissionChange(share, value as PermissionLevel)}
+            disabled={isUpdating || isRemoving}
+          >
+            <SelectTrigger
+              className="w-32"
+              aria-label={`Permission for ${share.user_email}`}
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {permissionOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  <div className="flex flex-col items-start">
+                    <span>{option.label}</span>
+                    <span className="text-xs text-muted-foreground">{option.description}</span>
+                  </div>
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        ) : (
+          <Badge variant="outline" className="capitalize">
+            {currentPermission}
+          </Badge>
+        )}
+
+        {canManageAccess && (
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="text-muted-foreground hover:text-destructive"
+                disabled={isRemoving}
+                aria-label={`Remove access for ${share.user_email}`}
+              >
+                {isRemoving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <UserMinus className="h-4 w-4" />
+                )}
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Remove Access</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Remove access for {share.user_email}? They will no longer be able to open this recording.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => onRemove(share.user_email)}
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                >
+                  Remove Access
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        )}
+      </div>
+    </div>
+  );
+}

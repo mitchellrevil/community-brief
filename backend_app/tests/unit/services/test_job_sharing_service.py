@@ -84,6 +84,26 @@ async def test_share_job_existing_share_updates():
 
 
 @pytest.mark.asyncio
+async def test_shared_admin_can_share_job():
+    job = {
+        "user_id": "owner",
+        "shared_with": [{"user_id": "manager", "user_email": "manager@example.com", "permission_level": "admin"}],
+    }
+    user_repository = MagicMock()
+    user_repository.get_by_email = AsyncMock(return_value={"id": "target", "email": "target@example.com"})
+    user_repository.get_by_id = AsyncMock(return_value={"id": "manager", "email": "manager@example.com"})
+
+    svc, _, repository, _ = build_service(user_repository=user_repository)
+    repository.get_by_id.return_value = job
+
+    res = await svc.share_job("j1", "manager", "target@example.com", permission_level="view")
+
+    assert res["status"] == "success"
+    assert res["shared_with_count"] == 2
+    assert job["shared_with"][-1]["shared_by"] == "manager"
+
+
+@pytest.mark.asyncio
 async def test_unshare_job_not_found_and_not_owner():
     svc, _, repository, _ = build_service()
     repository.get_by_id.return_value = None
@@ -111,6 +131,25 @@ async def test_unshare_job_success_and_not_shared():
     repository.get_by_id.return_value = job2
     res2 = await svc.unshare_job("j1", "owner", "not@here.com")
     assert res2["status"] == "error" and "not shared" in res2["message"].lower()
+
+
+@pytest.mark.asyncio
+async def test_shared_admin_can_unshare_job():
+    job = {
+        "user_id": "owner",
+        "shared_with": [
+            {"user_id": "manager", "user_email": "manager@example.com", "permission_level": "admin"},
+            {"user_id": "target", "user_email": "target@example.com", "permission_level": "view"},
+        ],
+    }
+    svc, _, repository, _ = build_service()
+    repository.get_by_id.return_value = job
+
+    res = await svc.unshare_job("j1", "manager", "target@example.com")
+
+    assert res["status"] == "success"
+    assert [share["user_email"] for share in job["shared_with"]] == ["manager@example.com"]
+    repository.replace.assert_called_once()
 
 
 @pytest.mark.asyncio

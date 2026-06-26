@@ -9,6 +9,7 @@ import { ContentTabs } from './ContentTabs';
 import { RecordingDetailsCard } from './RecordingDetailsCard';
 import { RecordingActionsCard } from './RecordingActionsCard';
 import { ChatInterface } from './ChatInterface';
+import type { SharedUserInfo } from '@/types/api';
 import { useJobStatusStream } from '@/hooks/useJobStatusStream';
 import { useIsMobile } from '@/hooks/useMobile';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -314,6 +315,12 @@ export function RecordingDetailsPage() {
   const currentUserId = currentUser?.user_id;
   const isOwner = Boolean(currentUserId && recording.user_id === currentUserId);
   const isShared = Boolean(currentUserId && recording.user_id && recording.user_id !== currentUserId);
+  const currentShare = Array.isArray(recording.shared_with)
+    ? (recording.shared_with as Array<SharedUserInfo>).find(
+        (share) => share.user_id === currentUserId || share.user_email === currentUser?.email,
+      )
+    : undefined;
+  const canManageSharing = isOwner || currentShare?.permission_level === 'admin';
 
   const handleDeleteSuccess = () => {
     navigate({ to: '/audio-recordings' });
@@ -405,6 +412,7 @@ export function RecordingDetailsPage() {
             <RecordingActionsCard
               isOwner={isOwner}
               isShared={isShared}
+              canManageSharing={canManageSharing}
               jobId={jobId || ''}
               onShare={() => setShareDialogOpen(true)}
               onDelete={() => setDeleteDialogOpen(true)}

@@ -17,6 +17,7 @@ import { MotionDiv } from '@/components/ui/motion';
 interface RecordingActionsCardProps {
   isOwner: boolean;
   isShared: boolean;
+  canManageSharing?: boolean;
   jobId: string;
   onShare: () => void;
   onDelete: () => void;
@@ -44,6 +45,7 @@ interface RecordingActionsCardProps {
 export const RecordingActionsCard = memo(function RecordingActionsCardView({
   isOwner,
   isShared,
+  canManageSharing = false,
   jobId,
   onShare,
   onDelete,
@@ -83,6 +85,7 @@ export const RecordingActionsCard = memo(function RecordingActionsCardView({
   };
 
   const fileType = getFileType(resolveAnalysisPath());
+  const showShareButton = isOwner || canManageSharing;
 
   const getAttemptFileName = (attemptNumber: number = normalizedAttempts.length) => {
     const suffix = normalizedAttempts.length > 1 ? `_attempt_${attemptNumber}` : '';
@@ -195,7 +198,7 @@ export const RecordingActionsCard = memo(function RecordingActionsCardView({
           <span className={isTinyScreen ? 'text-xs' : 'text-sm'}>Copy Link</span>
         </Button>
 
-        {isOwner && (
+        {showShareButton && (
           <>
             <Button
               onClick={onShare}
@@ -208,7 +211,11 @@ export const RecordingActionsCard = memo(function RecordingActionsCardView({
                 {isShared ? 'Manage Sharing' : 'Share Recording'}
               </span>
             </Button>
+          </>
+        )}
 
+        {isOwner && (
+          <>
             <Button
               onClick={onDelete}
               variant="destructive"
@@ -226,9 +233,11 @@ export const RecordingActionsCard = memo(function RecordingActionsCardView({
             <Badge variant="secondary" className="w-full justify-center">
               <span className={isTinyScreen ? 'text-xs' : 'text-sm'}>Shared with you</span>
             </Badge>
-            <p className={`${isTinyScreen ? 'text-xs' : 'text-xs sm:text-sm'} text-muted-foreground text-center`}>
-              Contact the owner to request changes
-            </p>
+            {!canManageSharing && (
+              <p className={`${isTinyScreen ? 'text-xs' : 'text-xs sm:text-sm'} text-muted-foreground text-center`}>
+                Contact the owner to request changes
+              </p>
+            )}
           </div>
         )}
       </CardContent>
