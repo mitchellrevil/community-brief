@@ -1,5 +1,5 @@
 # Core Framework
-fastapi==0.136.1
+fastapi==0.132.0
 uvicorn[standard]==0.47.0
 gunicorn==26.0.0
 python-multipart==0.0.28
@@ -30,9 +30,10 @@ aiofiles==25.1.0  # Async file I/O for uploads and temp files
 
 # AI & ML
 openai==2.36.0
-agent-framework-core==1.4.0
-agent-framework-openai==1.4.0
-agent-framework-ag-ui==1.0.0b260225
+agent-framework-core==1.9.0
+agent-framework-openai==1.8.2
+agent-framework-ag-ui==1.0.0rc5
+agent-framework==1.9.0
 
 # HTTP & Networking
 httpx==0.28.1

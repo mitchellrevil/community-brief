@@ -112,7 +112,7 @@ class ChatBotService:
         """Build a Microsoft Agent Framework agent using the existing OpenAI client."""
         try:
             from agent_framework import Agent
-            from agent_framework.openai import OpenAIResponsesClient
+            from agent_framework.openai import OpenAIChatClient
         except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - runtime dependency guard
             raise RuntimeError(
                 "Microsoft Agent Framework chat requires agent-framework-core, "
@@ -123,8 +123,8 @@ class ChatBotService:
         if self._should_set_temperature():
             options["temperature"] = 0.7
 
-        client = OpenAIResponsesClient(
-            model_id=self.model_deployment_name,
+        client = OpenAIChatClient(
+            model=self.model_deployment_name,
             async_client=self.client,
         )
         return Agent(
