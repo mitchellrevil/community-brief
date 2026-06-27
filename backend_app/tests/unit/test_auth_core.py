@@ -86,12 +86,14 @@ def create_user(
     user_id: str = "user_123",
     email: str = "user@example.com",
     permission: str = "Viewer",
+    is_active: bool = True,
 ):
     """Helper to create test user dicts."""
     return {
         "id": user_id,
         "email": email,
         "permission": permission,
+        "is_active": is_active,
     }
 
 
@@ -216,6 +218,26 @@ class TestGetCurrentUserLookup:
             
             assert exc_info.value.status_code == 401
             assert "User not found" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_raises_401_when_password_token_resolves_inactive_user(
+        self, mock_request, mock_credentials, mock_user_repository
+    ):
+        """Given a valid password token for an inactive user, authentication rejects it."""
+        mock_user_repository.get_by_id.return_value = create_user(is_active=False)
+
+        with patch("app.services.auth.identity_service.decode_token") as mock_decode:
+            mock_decode.return_value = create_jwt_payload()
+
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(
+                    mock_request,
+                    mock_credentials,
+                    mock_user_repository
+                )
+
+            assert exc_info.value.status_code == 401
+            assert "User inactive" in exc_info.value.detail
     
     @pytest.mark.asyncio
     async def test_handles_email_as_sub_claim(
@@ -301,6 +323,49 @@ class TestGetCurrentUserLookup:
             tenant_id="tenant-123",
             object_id="object-456",
         )
+
+    @pytest.mark.asyncio
+    async def test_rejects_inactive_existing_entra_user(
+        self,
+        mock_request,
+        mock_credentials,
+        mock_user_repository,
+        mock_config,
+    ):
+        """Given Entra resolves to an inactive existing user, authentication rejects it."""
+        mock_credentials.credentials = VALID_RS_TOKEN
+        mock_config.entra_api_scope = "api://sonic-brief/access_as_user"
+        mock_config.microsoft_client_id = "client-123"
+        mock_config.microsoft_tenant_id = "tenant-123"
+        mock_config.microsoft_jwks_timeout_seconds = 2.5
+        mock_user_repository.get_by_entra_identity.return_value = None
+        mock_user_repository.get_by_email.return_value = create_user(
+            user_id="entra_user",
+            email="entra@example.com",
+            is_active=False,
+        )
+
+        validator = MagicMock()
+        validator.validate_access_token.return_value = {
+            "tid": "tenant-123",
+            "oid": "object-456",
+            "preferred_username": "entra@example.com",
+            "scp": "access_as_user",
+            "azp": "client-123",
+        }
+
+        with patch("app.services.auth.identity_service.MicrosoftTokenValidator", return_value=validator):
+            with pytest.raises(HTTPException) as exc_info:
+                await get_current_user(
+                    mock_request,
+                    mock_credentials,
+                    mock_user_repository,
+                    mock_config,
+                )
+
+        assert exc_info.value.status_code == 401
+        assert "User inactive" in exc_info.value.detail
+        mock_user_repository.update.assert_not_called()
 
 
 class TestGetCurrentUserCrossRequestCaching:

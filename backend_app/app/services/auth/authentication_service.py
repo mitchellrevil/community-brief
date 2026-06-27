@@ -51,6 +51,8 @@ class AuthenticationService:
             return False
         if not verify_password(password, user["hashed_password"]):
             return False
+        if user.get("is_active") is False:
+            return False
         return user
 
     async def login(self, login_request: LoginRequest) -> AuthResponse:
@@ -82,7 +84,6 @@ class AuthenticationService:
             user["id"],
             {
                 "last_login": now_iso,
-                "is_active": True,
             },
         )
 

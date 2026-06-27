@@ -94,7 +94,7 @@ class AuthIdentityService:
                 else await self.user_repository.get_by_email(value)
             )
             if user:
-                return user
+                return self._require_active_user(user)
 
         raise AuthenticationError("User not found")
 
@@ -111,10 +111,13 @@ class AuthIdentityService:
             tenant_id=tenant_id,
             object_id=object_id,
         )
+        if user:
+            self._require_active_user(user)
 
         if not user and email:
             user = await self.user_repository.get_by_email(email)
             if user:
+                self._require_active_user(user)
                 user = await self.user_repository.update(
                     user["id"],
                     {
@@ -140,6 +143,11 @@ class AuthIdentityService:
             )
 
         user["auth_source"] = "entra"
+        return user
+
+    def _require_active_user(self, user: Dict[str, Any]) -> Dict[str, Any]:
+        if user.get("is_active") is False:
+            raise AuthenticationError("User inactive")
         return user
 
     def _build_entra_validator(self) -> MicrosoftTokenValidator:

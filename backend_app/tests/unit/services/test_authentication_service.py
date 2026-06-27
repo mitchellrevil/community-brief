@@ -54,11 +54,13 @@ def create_user(
     user_id: str = "user_123",
     email: str = "user@example.com",
     permission: str = "User",
+    is_active: bool = True,
 ) -> Dict[str, Any]:
     return {
         "id": user_id,
         "email": email,
         "permission": permission,
+        "is_active": is_active,
         "hashed_password": get_password_hash("correct_password"),
     }
 
@@ -191,7 +193,18 @@ class TestPasswordLogin:
         assert result.body["token_type"] == "bearer"
         mock_user_repository.update.assert_called_once()
         update_payload = mock_user_repository.update.call_args.args[1]
-        assert update_payload["is_active"] is True
+        assert "is_active" not in update_payload
+
+    @pytest.mark.asyncio
+    async def test_rejects_inactive_user_login(self, mock_user_repository, mock_config):
+        mock_user_repository.get_by_email.return_value = create_user(is_active=False)
+
+        with pytest.raises(AuthenticationError, match="Incorrect email or password"):
+            await auth_service(mock_user_repository, mock_config).login(
+                LoginRequest(email="user@example.com", password="correct_password")
+            )
+
+        mock_user_repository.update.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_raises_auth_error_on_wrong_password(self, mock_user_repository, mock_config):
