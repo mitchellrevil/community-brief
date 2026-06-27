@@ -4,6 +4,10 @@ from __future__ import annotations
 from typing import Any, Dict
 
 from ...core.errors.domain import ApplicationError, ErrorCode, ResourceNotFoundError, ValidationError
+from ...models.prompt_visibility import (
+    can_user_access_subcategory,
+    derive_subcategory_business_unit_id,
+)
 from ...services.auth.permission_service import PermissionService
 from ...services.interfaces import PromptServiceInterface, TalkingPointsServiceInterface
 from .prompt_version_service import PromptVersionService
@@ -29,8 +33,9 @@ class PromptVersionWorkflowService:
         subcategory_id: str,
         limit: int,
         offset: int,
+        current_user: Dict[str, Any],
     ) -> Dict[str, Any]:
-        await self._get_existing_subcategory(subcategory_id)
+        await self._get_existing_subcategory(subcategory_id, current_user=current_user)
         return await self.prompt_version_service.list_versions(
             subcategory_id,
             limit=limit,
@@ -42,8 +47,9 @@ class PromptVersionWorkflowService:
         *,
         subcategory_id: str,
         version_id: str,
+        current_user: Dict[str, Any],
     ) -> Dict[str, Any]:
-        await self._get_existing_subcategory(subcategory_id)
+        await self._get_existing_subcategory(subcategory_id, current_user=current_user)
         version = await self.prompt_version_service.get_version(subcategory_id, version_id)
         if not version:
             raise ResourceNotFoundError("Prompt version", version_id)
@@ -65,8 +71,9 @@ class PromptVersionWorkflowService:
         subcategory_id: str,
         left: str,
         right: str,
+        current_user: Dict[str, Any],
     ) -> Dict[str, Any]:
-        existing = await self._get_existing_subcategory(subcategory_id)
+        existing = await self._get_existing_subcategory(subcategory_id, current_user=current_user)
         try:
             return await self.prompt_version_service.diff_versions(
                 subcategory_id=subcategory_id,
@@ -109,9 +116,19 @@ class PromptVersionWorkflowService:
             return self.talking_points_service.ensure_talking_points_structure(rolled_back)
         return rolled_back
 
-    async def _get_existing_subcategory(self, subcategory_id: str) -> Dict[str, Any]:
+    async def _get_existing_subcategory(
+        self,
+        subcategory_id: str,
+        *,
+        current_user: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         existing = await self.prompt_service.get_subcategory(subcategory_id)
         if not existing:
+            raise ResourceNotFoundError("Prompt subcategory", subcategory_id)
+        if current_user is not None and not await self._can_read_subcategory(
+            current_user=current_user,
+            subcategory=existing,
+        ):
             raise ResourceNotFoundError("Prompt subcategory", subcategory_id)
         return existing
 
@@ -137,6 +154,20 @@ class PromptVersionWorkflowService:
             ErrorCode.FORBIDDEN,
             status_code=403,
             details={"subcategory_business_unit_id": subcategory.get("business_unit_id")},
+        )
+
+    async def _can_read_subcategory(
+        self,
+        *,
+        current_user: Dict[str, Any],
+        subcategory: Dict[str, Any],
+    ) -> bool:
+        business_unit_id = await derive_subcategory_business_unit_id(self.prompt_service, subcategory)
+        return can_user_access_subcategory(
+            current_user,
+            subcategory,
+            permission_service=self.permission_service,
+            business_unit_id=business_unit_id,
         )
 
 

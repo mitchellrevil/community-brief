@@ -60,6 +60,8 @@ async def test_list_subcategory_versions_returns_payload():
         "id": "sub1",
         "business_unit_id": "bu1",
     }
+    perm = MagicMock()
+    perm.has_business_unit_access.return_value = True
 
     version_service = MagicMock()
     version_service.list_versions = AsyncMock(
@@ -89,6 +91,7 @@ async def test_list_subcategory_versions_returns_payload():
         auth_context="user",
         prompt_service=mock_prompt_service,
         prompt_version_service=version_service,
+        perm_service=perm,
     )
 
     assert result["total"] == 1

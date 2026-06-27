@@ -7,6 +7,7 @@ from ...core.errors.domain import ApplicationError, ErrorCode, ResourceNotFoundE
 from ...models.permissions import PermissionLevel, has_permission_level
 from ...models.prompt_visibility import (
     can_user_access_subcategory,
+    derive_subcategory_business_unit_id,
     normalize_prompt_visibility,
 )
 from ...utils.cache_utils import TTLCache
@@ -53,13 +54,14 @@ class PromptReadService:
             except DatabaseError as exc:
                 raise self._database_unavailable("list prompt subcategories") from exc
 
-            subcategories = result["items"]
-            if not (include_hidden and self._is_editor(current_user)):
-                subcategories = [
-                    item for item in subcategories if can_user_access_subcategory(current_user, item)
-                ]
-
-            subcategories = [self._ensure_talking_points(item) for item in subcategories]
+            subcategories = []
+            for item in result["items"]:
+                if await self._can_access_subcategory(
+                    current_user=current_user,
+                    subcategory=item,
+                    include_hidden=include_hidden,
+                ):
+                    subcategories.append(self._ensure_talking_points(item))
 
             return {
                 "subcategories": subcategories,
@@ -85,7 +87,10 @@ class PromptReadService:
         if not subcategory:
             raise ResourceNotFoundError("Prompt subcategory", subcategory_id)
 
-        if not self._is_editor(current_user) and not can_user_access_subcategory(current_user, subcategory):
+        if not await self._can_access_subcategory(
+            current_user=current_user,
+            subcategory=subcategory,
+        ):
             raise ResourceNotFoundError("Prompt subcategory", subcategory_id)
 
         return self._ensure_talking_points(subcategory)
@@ -101,14 +106,20 @@ class PromptReadService:
 
             filtered_data: List[Dict[str, Any]] = []
             for category in data:
-                visible_subcategories = [
-                    {
-                        **subcategory,
-                        "prompt_visibility": normalize_prompt_visibility(subcategory.get("prompt_visibility")),
-                    }
-                    for subcategory in category.get("subcategories", [])
-                    if can_user_access_subcategory(current_user, subcategory)
-                ]
+                visible_subcategories = []
+                for subcategory in category.get("subcategories", []):
+                    if not await self._can_access_subcategory(
+                        current_user=current_user,
+                        subcategory=subcategory,
+                        fallback_category_id=category.get("category_id"),
+                    ):
+                        continue
+                    visible_subcategories.append(
+                        {
+                            **subcategory,
+                            "prompt_visibility": normalize_prompt_visibility(subcategory.get("prompt_visibility")),
+                        }
+                    )
                 filtered_data.append({**category, "subcategories": visible_subcategories})
 
             return {"status": 200, "data": filtered_data}
@@ -129,6 +140,28 @@ class PromptReadService:
         return has_permission_level(
             (current_user or {}).get("permission"),
             PermissionLevel.EDITOR.value,
+        )
+
+    async def _can_access_subcategory(
+        self,
+        *,
+        current_user: Dict[str, Any],
+        subcategory: Dict[str, Any],
+        include_hidden: bool = False,
+        fallback_category_id: Optional[str] = None,
+    ) -> bool:
+        business_unit_id = await derive_subcategory_business_unit_id(
+            self.prompt_service,
+            subcategory,
+            fallback_category_id=fallback_category_id,
+        )
+        subcategory_for_check = subcategory
+        if include_hidden and self._is_editor(current_user):
+            subcategory_for_check = {**subcategory, "visible_to_user_ids": None}
+        return can_user_access_subcategory(
+            current_user,
+            subcategory_for_check,
+            business_unit_id=business_unit_id,
         )
 
     @staticmethod

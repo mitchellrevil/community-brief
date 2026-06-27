@@ -1,7 +1,12 @@
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set
 
-from .permissions import PermissionLevel, has_permission_level
+from .permissions import (
+    PERMISSION_HIERARCHY,
+    PermissionLevel,
+    get_permission_level,
+    has_permission_level,
+)
 
 
 class PromptVisibility(str, Enum):
@@ -86,6 +91,47 @@ def can_user_use_prompt_visibility(current_user: Optional[Dict[str, Any]], visib
     return True
 
 
+async def derive_subcategory_business_unit_id(
+    prompt_service: Any,
+    subcategory: Optional[Dict[str, Any]],
+    *,
+    fallback_category_id: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve the root business unit for a prompt subcategory when possible."""
+
+    category_id = fallback_category_id or (subcategory or {}).get("category_id")
+    if prompt_service and category_id:
+        resolver = getattr(prompt_service, "get_business_unit_id_from_category", None)
+        if callable(resolver):
+            resolved = await resolver(category_id)
+            if isinstance(resolved, str) and resolved:
+                return resolved
+
+    if subcategory:
+        business_unit_id = subcategory.get("business_unit_id")
+        if isinstance(business_unit_id, str) and business_unit_id:
+            return business_unit_id
+
+    return None
+
+
+def _user_has_business_unit_access(
+    current_user: Dict[str, Any],
+    business_unit_id: str,
+) -> bool:
+    if not current_user or not business_unit_id:
+        return False
+
+    if get_permission_level(current_user.get("permission", "")) >= PERMISSION_HIERARCHY.get(
+        PermissionLevel.ADMIN.value,
+        0,
+    ):
+        return True
+
+    business_unit_ids = current_user.get("business_unit_ids") or []
+    return isinstance(business_unit_ids, list) and business_unit_id in business_unit_ids
+
+
 def can_user_access_subcategory(
     current_user: Optional[Dict[str, Any]],
     subcategory: Dict[str, Any],
@@ -115,9 +161,13 @@ def can_user_access_subcategory(
     if normalized_visibility == PromptVisibility.NOBODY.value:
         return False
 
-    # 2. Business unit access (skip if no permission_service or BU info)
-    if permission_service and business_unit_id:
-        if not permission_service.has_business_unit_access(current_user, business_unit_id):
+    # 2. Business unit access
+    if business_unit_id:
+        if permission_service:
+            has_access = permission_service.has_business_unit_access(current_user, business_unit_id)
+        else:
+            has_access = _user_has_business_unit_access(current_user, business_unit_id)
+        if not has_access:
             return False
 
     # 3. Explicit user allowlist. When set, only matching users get access.

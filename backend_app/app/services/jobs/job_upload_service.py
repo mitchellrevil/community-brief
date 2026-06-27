@@ -11,18 +11,12 @@ from fastapi import UploadFile
 from ...core.errors.domain import (
     ApplicationError,
     ErrorCode,
-    PermissionError as ApplicationPermissionError,
-    ResourceNotFoundError,
-    ValidationError,
 )
 from ...core.logging import get_logger
-from ...models.prompt_visibility import (
-    can_user_use_prompt_visibility,
-    normalize_prompt_visibility,
-)
 from ...utils.file_utils import FileUtils
 from ..interfaces import AnalyticsServiceInterface, PromptServiceInterface
 from .job_service import JobService
+from ..uploads.upload_workflow_service import validate_prompt_subcategory_usage
 
 logger = get_logger(__name__)
 
@@ -110,26 +104,12 @@ class JobUploadService:
         prompt_category_id: Optional[str],
         prompt_subcategory_id: Optional[str],
     ) -> None:
-        if not prompt_subcategory_id:
-            return
-
-        subcategory = await self.prompt_service.get_subcategory(prompt_subcategory_id)
-        if not subcategory:
-            raise ResourceNotFoundError("Prompt subcategory", prompt_subcategory_id)
-
-        visibility = normalize_prompt_visibility(subcategory.get("prompt_visibility"))
-        if not can_user_use_prompt_visibility(current_user, visibility):
-            raise ApplicationPermissionError("You do not have access to use this prompt type.")
-
-        if (
-            prompt_category_id
-            and subcategory.get("category_id")
-            and subcategory.get("category_id") != prompt_category_id
-        ):
-            raise ValidationError(
-                "Prompt category does not match the selected prompt type.",
-                field="prompt_category_id",
-            )
+        await validate_prompt_subcategory_usage(
+            prompt_service=self.prompt_service,
+            current_user=current_user,
+            prompt_subcategory_id=prompt_subcategory_id,
+            prompt_category_id=prompt_category_id,
+        )
 
     async def _acquire_upload_slot(self, user_id: Optional[str]) -> None:
         try:

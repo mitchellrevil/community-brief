@@ -130,6 +130,32 @@ async def test_create_job_from_upload_rejects_prompt_category_mismatch(
 
 
 @pytest.mark.asyncio
+async def test_create_job_from_upload_rejects_cross_business_unit_prompt(
+    job_service,
+    analytics_service,
+    prompt_service,
+):
+    prompt_service.get_subcategory.return_value = {
+        "id": "sub-1",
+        "category_id": "cat-actual",
+        "prompt_visibility": "all",
+        "visible_to_user_ids": None,
+    }
+    prompt_service.get_business_unit_id_from_category.return_value = "bu-other"
+    service = JobUploadService(job_service, analytics_service, prompt_service)
+
+    with pytest.raises(ApplicationError) as exc:
+        await service.create_job_from_upload(
+            file=_upload(),
+            current_user={"id": "user-123", "email": "user@example.com", "business_unit_ids": ["bu-home"]},
+            prompt_subcategory_id="sub-1",
+        )
+
+    assert exc.value.status_code == 403
+    job_service.upload_and_create_job.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_create_job_from_upload_does_not_fail_when_analytics_runtime_error_occurs(
     current_user,
     job_service,

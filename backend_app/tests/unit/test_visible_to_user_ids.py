@@ -147,6 +147,11 @@ class TestCanUserAccessSubcategory:
             user, subcategory, permission_service=perm_service, business_unit_id="bu1"
         ) is True
 
+    def test_business_unit_access_uses_current_user_when_no_service_provided(self):
+        subcategory = {"prompt_visibility": "all"}
+        user = {"id": "u1", "permission": "user", "business_unit_ids": ["bu2"]}
+        assert can_user_access_subcategory(user, subcategory, business_unit_id="bu1") is False
+
 
 # ─── Router-level tests for retrieve_prompts filtering ────────────────
 
@@ -265,6 +270,36 @@ async def test_list_subcategories_include_hidden_returns_all_for_editor():
 
 
 @pytest.mark.asyncio
+async def test_list_subcategories_include_hidden_still_filters_cross_business_unit_for_editor():
+    mock_prompt_service = AsyncMock()
+    mock_prompt_service.list_subcategories.return_value = {
+        "items": [
+            {"id": "s1", "category_id": "cat1", "name": "Own BU", "prompt_visibility": "all", "visible_to_user_ids": ["other"]},
+            {"id": "s2", "category_id": "cat2", "name": "Other BU", "prompt_visibility": "all", "visible_to_user_ids": None},
+        ],
+        "total": 2,
+        "limit": 50,
+        "offset": 0,
+    }
+    mock_prompt_service.get_business_unit_id_from_category = AsyncMock(side_effect=["bu1", "bu2"])
+    mock_talking_points_service = MagicMock()
+    mock_talking_points_service.ensure_talking_points_structure = lambda x: x
+
+    result = await prompts_mod.list_subcategories(
+        category_id=None,
+        limit=50,
+        offset=0,
+        include_hidden=True,
+        current_user={"id": "editor_user_bu_filter", "permission": "editor", "business_unit_ids": ["bu1"]},
+        auth_context="editor",
+        prompt_service=mock_prompt_service,
+        talking_points_service=mock_talking_points_service,
+    )
+
+    assert [item["id"] for item in result["subcategories"]] == ["s1"]
+
+
+@pytest.mark.asyncio
 async def test_list_subcategories_include_hidden_still_filters_for_non_editor():
     """Non-editors cannot bypass visibility filtering by passing include_hidden=True."""
     mock_prompt_service = AsyncMock()
@@ -363,3 +398,27 @@ async def test_upload_validate_unrestricted_when_no_allowlist():
         current_user={"id": "any_user", "permission": "user"},
         prompt_subcategory_id="sub1",
     )
+
+
+@pytest.mark.asyncio
+async def test_upload_validate_rejects_cross_business_unit_user():
+    from backend_app.app.services.uploads.upload_workflow_service import validate_prompt_subcategory_usage
+    from backend_app.app.core.errors.domain import ApplicationError
+
+    mock_prompt_service = AsyncMock()
+    mock_prompt_service.get_subcategory.return_value = {
+        "id": "sub1",
+        "category_id": "cat1",
+        "prompt_visibility": "all",
+        "visible_to_user_ids": None,
+    }
+    mock_prompt_service.get_business_unit_id_from_category.return_value = "bu2"
+
+    with pytest.raises(ApplicationError) as exc_info:
+        await validate_prompt_subcategory_usage(
+            prompt_service=mock_prompt_service,
+            current_user={"id": "user_1", "permission": "user", "business_unit_ids": ["bu1"]},
+            prompt_subcategory_id="sub1",
+        )
+
+    assert exc_info.value.status_code == 403

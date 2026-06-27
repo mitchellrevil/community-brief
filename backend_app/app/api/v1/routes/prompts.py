@@ -260,12 +260,14 @@ async def list_subcategory_versions(
     auth_context: str = Depends(require_user),
     prompt_service: PromptServiceInterface = Depends(get_prompt_service),
     prompt_version_service: PromptVersionService = Depends(get_prompt_version_service),
+    perm_service: PermissionService = Depends(get_permission_service),
 ) -> Dict[str, Any]:
     decoded_id = unquote(subcategory_id)
     return await PromptVersionWorkflowService(
         prompt_service=prompt_service,
         prompt_version_service=prompt_version_service,
-    ).list_versions(subcategory_id=decoded_id, limit=limit, offset=offset)
+        permission_service=perm_service,
+    ).list_versions(subcategory_id=decoded_id, limit=limit, offset=offset, current_user=current_user)
 
 
 @router.get("/subcategories/{subcategory_id:path}/versions/by-id/{version_id}", response_model=PromptVersionDetailResponse)
@@ -276,12 +278,14 @@ async def get_subcategory_version(
     auth_context: str = Depends(require_user),
     prompt_service: PromptServiceInterface = Depends(get_prompt_service),
     prompt_version_service: PromptVersionService = Depends(get_prompt_version_service),
+    perm_service: PermissionService = Depends(get_permission_service),
 ) -> Dict[str, Any]:
     decoded_id = unquote(subcategory_id)
     return await PromptVersionWorkflowService(
         prompt_service=prompt_service,
         prompt_version_service=prompt_version_service,
-    ).get_version(subcategory_id=decoded_id, version_id=version_id)
+        permission_service=perm_service,
+    ).get_version(subcategory_id=decoded_id, version_id=version_id, current_user=current_user)
 
 
 @router.get("/subcategories/{subcategory_id:path}/versions/diff", response_model=PromptVersionDiffResponse)
@@ -293,12 +297,14 @@ async def diff_subcategory_versions(
     auth_context: str = Depends(require_user),
     prompt_service: PromptServiceInterface = Depends(get_prompt_service),
     prompt_version_service: PromptVersionService = Depends(get_prompt_version_service),
+    perm_service: PermissionService = Depends(get_permission_service),
 ) -> Dict[str, Any]:
     decoded_id = unquote(subcategory_id)
     return await PromptVersionWorkflowService(
         prompt_service=prompt_service,
         prompt_version_service=prompt_version_service,
-    ).diff_versions(subcategory_id=decoded_id, left=left, right=right)
+        permission_service=perm_service,
+    ).diff_versions(subcategory_id=decoded_id, left=left, right=right, current_user=current_user)
 
 
 @router.post("/subcategories/{subcategory_id:path}/versions/{version_id}/rollback", response_model=SubcategoryResponse)

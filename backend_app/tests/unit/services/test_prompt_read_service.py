@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import AsyncMock
 
+from app.core.errors.domain import ResourceNotFoundError
 from app.services.prompts.prompt_read_service import PromptReadService
 
 
@@ -88,3 +89,41 @@ async def test_retrieve_prompts_reuses_cached_response():
 
     assert first == second
     assert prompt_service.retrieve_prompts_hierarchy.await_count == 1
+
+
+async def test_get_subcategory_rejects_hidden_prompt_for_editor():
+    prompt_service = AsyncMock()
+    prompt_service.get_subcategory.return_value = {
+        "id": "sub_1",
+        "category_id": "cat_1",
+        "name": "Hidden subcategory",
+        "prompt_visibility": "nobody",
+        "visible_to_user_ids": None,
+    }
+    prompt_service.get_business_unit_id_from_category.return_value = "bu_1"
+    service = PromptReadService(prompt_service=prompt_service, talking_points_service=None)
+
+    with pytest.raises(ResourceNotFoundError):
+        await service.get_subcategory(
+            subcategory_id="sub_1",
+            current_user={"id": "editor_1", "permission": "editor", "business_unit_ids": ["bu_1"]},
+        )
+
+
+async def test_get_subcategory_rejects_cross_business_unit_prompt():
+    prompt_service = AsyncMock()
+    prompt_service.get_subcategory.return_value = {
+        "id": "sub_2",
+        "category_id": "cat_2",
+        "name": "Other BU subcategory",
+        "prompt_visibility": "all",
+        "visible_to_user_ids": None,
+    }
+    prompt_service.get_business_unit_id_from_category.return_value = "bu_2"
+    service = PromptReadService(prompt_service=prompt_service, talking_points_service=None)
+
+    with pytest.raises(ResourceNotFoundError):
+        await service.get_subcategory(
+            subcategory_id="sub_2",
+            current_user={"id": "user_1", "permission": "user", "business_unit_ids": ["bu_1"]},
+        )

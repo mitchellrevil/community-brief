@@ -17,6 +17,7 @@ from ...core.errors.domain import (
 )
 from ...core.logging import get_logger
 from ...models.prompt_visibility import can_user_access_subcategory
+from ...models.prompt_visibility import derive_subcategory_business_unit_id
 from ...services.interfaces import AnalyticsServiceInterface, PromptServiceInterface
 from ...services.jobs.job_service import JobService
 from ...services.storage.blob_service import StorageService
@@ -45,7 +46,12 @@ async def validate_prompt_subcategory_usage(
     if not subcategory:
         raise ResourceNotFoundError("Prompt subcategory", prompt_subcategory_id)
 
-    if not can_user_access_subcategory(current_user, subcategory):
+    business_unit_id = await derive_subcategory_business_unit_id(prompt_service, subcategory)
+    if not can_user_access_subcategory(
+        current_user,
+        subcategory,
+        business_unit_id=business_unit_id,
+    ):
         raise ApplicationPermissionError("You do not have access to use this prompt type.")
 
     if (
