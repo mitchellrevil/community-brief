@@ -11,10 +11,11 @@ interface ChatInterfaceProps {
   isTinyScreen: boolean;
   isOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  onAnalysisUpdated?: (analysisText: string) => void;
 }
 
 /** Adaptive chat orchestrator - delegates to DesktopChatPanel or MobileChatModal */
-export function ChatInterface({ jobId, isMobile, isTinyScreen, isOpen: isOpenProp, onOpenChange }: ChatInterfaceProps) {
+export function ChatInterface({ jobId, isMobile, isTinyScreen, isOpen: isOpenProp, onOpenChange, onAnalysisUpdated }: ChatInterfaceProps) {
   const [isOpen, setIsOpen] = useState<boolean>(isOpenProp ?? false);
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -47,7 +48,7 @@ export function ChatInterface({ jobId, isMobile, isTinyScreen, isOpen: isOpenPro
     messagesEndRef,
     handleSubmit,
     handleClearHistory,
-  } = useChatInterface({ jobId });
+  } = useChatInterface({ jobId, onAnalysisUpdated });
 
   // Hide chat button on mobile - parent controls visibility
   if (!isOpen && isMobile) {

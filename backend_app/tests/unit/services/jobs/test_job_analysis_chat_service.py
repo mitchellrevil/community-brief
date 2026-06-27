@@ -187,6 +187,7 @@ async def test_apply_analysis_patch_updates_markdown_when_edit_allowed(chat_hist
     )
 
     assert result["status"] == "applied"
+    assert result["analysis_text"] == "A new B old"
     storage_service.upload_text_to_blob.assert_awaited_once_with(
         "https://storage.blob.core.windows.net/jobs/analysis.md?sig=1",
         "A new B old",
@@ -214,6 +215,18 @@ async def test_apply_analysis_patch_requires_edit_permission(chat_history_servic
         )
 
     storage_service.upload_text_to_blob.assert_not_called()
+
+
+def test_analysis_updated_event_contains_latest_analysis_text():
+    event = JobAnalysisChatService._analysis_updated_event("j1", "new analysis")
+
+    assert _events([event]) == [
+        {
+            "type": "ANALYSIS_UPDATED",
+            "jobId": "j1",
+            "analysisText": "new analysis",
+        }
+    ]
 
 
 @pytest.mark.asyncio

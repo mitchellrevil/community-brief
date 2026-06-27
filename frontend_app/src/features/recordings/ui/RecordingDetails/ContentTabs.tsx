@@ -1,4 +1,4 @@
-import { memo, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { FileText, Loader2, RefreshCw } from 'lucide-react';
 import { TranscriptionTab } from './TranscriptionTab';
 import { AnalysisTab } from './AnalysisTab';
@@ -12,6 +12,7 @@ import { MotionDiv } from '@/components/ui/motion';
 interface ContentTabsProps {
   transcriptionText: string | undefined;
   analysisText: string | undefined;
+  analysisUpdateKey?: number;
   analysisFilePath: string | undefined;
   analysisAttempts?: Array<{
     attempt?: number;
@@ -39,6 +40,7 @@ interface ContentTabsProps {
 export const ContentTabs = memo(function ContentTabsView({
   transcriptionText,
   analysisText,
+  analysisUpdateKey,
   analysisFilePath,
   analysisAttempts,
   analysisInProgress,
@@ -58,6 +60,12 @@ export const ContentTabs = memo(function ContentTabsView({
 }: ContentTabsProps) {
   const isRecent = Boolean(createdAt) && new Date(createdAt).getTime() > Date.now() - 10 * 24 * 60 * 60 * 1000;
   const [activeTab, setActiveTab] = useState('transcription');
+
+  useEffect(() => {
+    if (analysisUpdateKey) {
+      setActiveTab('analysis');
+    }
+  }, [analysisUpdateKey]);
 
   return (
     <Card className="border-border/50 bg-card/50 backdrop-blur-sm w-full overflow-hidden">
@@ -132,6 +140,7 @@ export const ContentTabs = memo(function ContentTabsView({
                 >
                   <AnalysisTab
                     analysisText={analysisText}
+                    analysisUpdateKey={analysisUpdateKey}
                     analysisFilePath={analysisFilePath}
                     analysisAttempts={analysisAttempts}               analysisInProgress={analysisInProgress}              jobId={jobId}
                     onDownload={onDownload}

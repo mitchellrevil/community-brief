@@ -225,6 +225,7 @@ export function RecordingDetailsPage() {
   } = useRecordingActions();
 
   const [chatOpen, setChatOpen] = React.useState(false);
+  const [analysisUpdateKey, setAnalysisUpdateKey] = React.useState(0);
 
   const [reprocessDialogOpen, setReprocessDialogOpen] = React.useState(false);
 
@@ -255,6 +256,14 @@ export function RecordingDetailsPage() {
     }
     handleDownload(path, fileName);
   }, [handleDownload, handleDownloadAnalysis, isAnalysisPath]);
+
+  const handleAnalysisUpdated = React.useCallback((analysisText: string) => {
+    setRecordingState((current: any) => ({
+      ...(current || recording),
+      analysis_text: analysisText,
+    }));
+    setAnalysisUpdateKey((key) => key + 1);
+  }, [recording]);
 
   // Loading state
   if (isLoading || !recording) {
@@ -371,6 +380,7 @@ export function RecordingDetailsPage() {
             <ContentTabs
               transcriptionText={transcriptionText}
               analysisText={recording.analysis_text}
+              analysisUpdateKey={analysisUpdateKey}
               analysisFilePath={recording.analysis_file_path}
               analysisAttempts={recording.analysis_attempts}              analysisInProgress={recording.analysis_in_progress}              jobId={jobId || ''}
               createdAt={String(recording.created_at)}
@@ -441,6 +451,7 @@ export function RecordingDetailsPage() {
         isTinyScreen={isTinyScreen}
         isOpen={chatOpen}
         onOpenChange={setChatOpen}
+        onAnalysisUpdated={handleAnalysisUpdated}
       />
 
       {/* Dialogs */}

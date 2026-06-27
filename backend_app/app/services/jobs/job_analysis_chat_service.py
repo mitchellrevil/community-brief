@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator, Sequence
-from typing import Any
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 from ...core.errors.domain import PermissionError
@@ -55,6 +55,11 @@ class JobAnalysisChatService:
             job_id=job_id,
             user_id=current_user.get("id"),
         )
+        analysis_update: str | None = None
+
+        def set_analysis_update(text: str) -> None:
+            nonlocal analysis_update
+            analysis_update = text
 
         try:
             context_prompt = await self._build_context_prompt(job_id, job)
@@ -68,7 +73,11 @@ class JobAnalysisChatService:
 
             agent = self.chatbot_service.build_agent(
                 instructions=context_prompt,
-                tools=self._build_agent_tools(job_id=job_id, current_user=current_user),
+                tools=self._build_agent_tools(
+                    job_id=job_id,
+                    current_user=current_user,
+                    on_analysis_update=set_analysis_update,
+                ),
                 max_tokens=max_tokens,
             )
             input_data: dict[str, Any] = {
@@ -93,6 +102,11 @@ class JobAnalysisChatService:
 
             async for event in AgentFrameworkAgent(agent, require_confirmation=False).run(input_data):
                 yield self._format_ag_ui_event(event)
+                if analysis_update is not None:
+                    yield self._analysis_updated_event(job_id, analysis_update)
+                    analysis_update = None
+            if analysis_update is not None:
+                yield self._analysis_updated_event(job_id, analysis_update)
         except JOB_CHAT_STREAM_ERRORS as exc:
             logger.error(
                 "job_chat_ag_ui_generator_failed",
@@ -103,7 +117,13 @@ class JobAnalysisChatService:
             )
             yield self._ag_ui_error_event(str(exc), thread_id or job_id, run_id)
 
-    def _build_agent_tools(self, *, job_id: str, current_user: dict[str, Any]) -> list[Any]:
+    def _build_agent_tools(
+        self,
+        *,
+        job_id: str,
+        current_user: dict[str, Any],
+        on_analysis_update: Callable[[str], None] | None = None,
+    ) -> list[Any]:
         try:
             from agent_framework import tool
         except (ImportError, ModuleNotFoundError) as exc:  # pragma: no cover - runtime dependency guard
@@ -131,13 +151,17 @@ class JobAnalysisChatService:
             ),
         )
         async def apply_patch(old_text: str, new_text: str, occurrence: int = 1) -> dict[str, Any]:
-            return await self.apply_analysis_patch(
+            result = await self.apply_analysis_patch(
                 job_id=job_id,
                 current_user=current_user,
                 old_text=old_text,
                 new_text=new_text,
                 occurrence=occurrence,
             )
+            updated_text = result.pop("analysis_text", None)
+            if updated_text is not None and on_analysis_update is not None:
+                on_analysis_update(updated_text)
+            return result
 
         return [read_transcription, read_analysis_markdown, apply_patch]
 
@@ -225,6 +249,7 @@ class JobAnalysisChatService:
             "message": "analysis.md updated.",
             "matches": matches,
             "analysis_length": len(updated_text),
+            "analysis_text": updated_text,
         }
 
     async def _build_context_prompt(self, job_id: str, job: dict[str, Any]) -> str:
@@ -365,6 +390,15 @@ class JobAnalysisChatService:
             "threadId": thread_id,
             "runId": run_id,
             "message": message,
+        }
+        return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+    @staticmethod
+    def _analysis_updated_event(job_id: str, analysis_text: str) -> str:
+        payload = {
+            "type": "ANALYSIS_UPDATED",
+            "jobId": job_id,
+            "analysisText": analysis_text,
         }
         return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 

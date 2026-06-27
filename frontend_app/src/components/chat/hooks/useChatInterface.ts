@@ -15,6 +15,7 @@ export interface ChatMessage {
  */
 export interface UseChatInterfaceOptions {
   jobId: string;
+  onAnalysisUpdated?: (analysisText: string) => void;
 }
 
 /**
@@ -35,7 +36,7 @@ export interface UseChatInterfaceReturn {
  * Custom hook that encapsulates all chat interface logic.
  * Handles message state, streaming responses, history management.
  */
-export function useChatInterface({ jobId }: UseChatInterfaceOptions): UseChatInterfaceReturn {
+export function useChatInterface({ jobId, onAnalysisUpdated }: UseChatInterfaceOptions): UseChatInterfaceReturn {
   const [messages, setMessages] = useState<Array<ChatMessage>>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -201,6 +202,8 @@ export function useChatInterface({ jobId }: UseChatInterfaceOptions): UseChatInt
             const event = JSON.parse(data);
             if (event.type === 'TEXT_MESSAGE_CONTENT') {
               appendAssistantDelta(event.delta || '');
+            } else if (event.type === 'ANALYSIS_UPDATED') {
+              onAnalysisUpdated?.(event.analysisText || '');
             } else if (event.type === 'RUN_ERROR') {
               setError(event.message || 'Chat stream failed');
             }
@@ -221,7 +224,7 @@ export function useChatInterface({ jobId }: UseChatInterfaceOptions): UseChatInt
     } finally {
       setIsLoading(false);
     }
-  }, [input, messages, jobId, saveMessageToHistory]);
+  }, [input, messages, jobId, saveMessageToHistory, onAnalysisUpdated]);
 
   return {
     messages,

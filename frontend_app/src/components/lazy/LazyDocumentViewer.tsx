@@ -161,6 +161,7 @@ type MammothModule = {
 
 interface LazyDocumentViewerProps {
   analysisText: string;
+  analysisUpdateKey?: number;
   analysisFilePath?: string;
   analysisAttempts?: Array<AnalysisAttempt>;
   analysisInProgress?: boolean;
@@ -192,6 +193,7 @@ const normalizeCheckboxes = (md: string) => {
  */
 function LazyDocumentViewerInner({
   analysisText,
+  analysisUpdateKey,
   analysisFilePath,
   analysisAttempts,
   analysisInProgress,
@@ -207,8 +209,10 @@ function LazyDocumentViewerInner({
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [debugRawContent, setDebugRawContent] = useState<string>('');
   const [isLoading, setIsLoading] = useState(false);
+  const [isContentChanging, setIsContentChanging] = useState(false);
 
   const turndownServiceRef = useRef<TurndownService | null>(null);
+  const contentChangeTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const {
     activeAnalysisFilePath,
@@ -311,6 +315,21 @@ function LazyDocumentViewerInner({
 
     loadContent();
   }, [effectiveAnalysisText, hasRealAnalysisText, activeAnalysisFilePath, fileType]);
+
+  useEffect(() => {
+    if (!analysisUpdateKey) return;
+    setIsContentChanging(true);
+    if (contentChangeTimeoutRef.current) {
+      clearTimeout(contentChangeTimeoutRef.current);
+    }
+    contentChangeTimeoutRef.current = setTimeout(() => setIsContentChanging(false), 1200);
+  }, [analysisUpdateKey]);
+
+  useEffect(() => () => {
+    if (contentChangeTimeoutRef.current) {
+      clearTimeout(contentChangeTimeoutRef.current);
+    }
+  }, []);
 
   const handleSave = async () => {
     if (!onSave) return;
@@ -477,7 +496,9 @@ function LazyDocumentViewerInner({
             </Suspense>
           ) : fullContent ? (
             <div className="animate-in fade-in duration-500 max-w-[85ch] mx-auto text-base pb-4">
-              <div className="bg-background shadow-sm border rounded-xl px-4 py-6 sm:px-7 sm:py-1 min-h-[600px]">
+              <div className={`bg-background shadow-sm border rounded-xl px-4 py-6 sm:px-7 sm:py-1 min-h-[600px] transition-all duration-500 ${
+                isContentChanging ? 'border-primary/50 shadow-primary/20 animate-pulse' : ''
+              }`}>
                 <MarkdownRenderer content={fullContent} />
               </div>
             </div>

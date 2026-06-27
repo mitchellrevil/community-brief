@@ -3,6 +3,7 @@ import { LazyDocumentViewer } from '@/components/lazy/LazyDocumentViewer';
 
 interface AnalysisTabProps {
   analysisText: string | undefined;
+  analysisUpdateKey?: number;
   analysisFilePath: string | undefined;
   analysisAttempts?: Array<{
     attempt?: number;
@@ -20,7 +21,7 @@ interface AnalysisTabProps {
  * Analysis tab content with conditional rendering
  * Displays analysis document or loading state
  */
-export function AnalysisTab({ analysisText, analysisFilePath, analysisAttempts, analysisInProgress, jobId, onDownload, onReprocess, compact }: AnalysisTabProps) {
+export function AnalysisTab({ analysisText, analysisUpdateKey, analysisFilePath, analysisAttempts, analysisInProgress, jobId, onDownload, onReprocess, compact }: AnalysisTabProps) {
   const hasAnalysis = (analysisText && analysisText.trim() !== '') || analysisFilePath;
 
   if (hasAnalysis) {
@@ -28,6 +29,7 @@ export function AnalysisTab({ analysisText, analysisFilePath, analysisAttempts, 
       <div className="space-y-3">
         <LazyDocumentViewer
           analysisText={analysisText || ''}
+          analysisUpdateKey={analysisUpdateKey}
           analysisFilePath={analysisFilePath}
           analysisAttempts={analysisAttempts}
           analysisInProgress={analysisInProgress}
