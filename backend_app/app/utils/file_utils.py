@@ -1,9 +1,10 @@
-import mimetypes
 import os
 import shutil
 from datetime import UTC, datetime, timedelta
-from typing import Tuple, Optional
+from pathlib import Path
+from typing import Optional, Tuple
 from app.core.logging import get_logger
+from app.utils.input_validation import InputValidator
 
 logger = get_logger(__name__)
 
@@ -32,6 +33,14 @@ class FileUtils:
         "flac": "audio/flac",
         "webm": "audio/webm",
     }
+    DANGEROUS_FILE_PATTERNS = [
+        b"<script",
+        b"javascript:",
+        b"<?php",
+        b"eval(",
+        b"exec(",
+        b"MZ\x90\x00",
+    ]
 
     def __init__(self):
         self.logger = logger
@@ -78,7 +87,7 @@ class FileUtils:
             logger.warning("audio_duration_missing", file_path=file_path)
             return None
 
-        except FILE_UTILS_ERRORS as exc:
+        except Exception as exc:
             logger.error("audio_duration_extract_failed", file_path=file_path, error=str(exc), exc_info=True)
             return None
 
@@ -120,16 +129,27 @@ class FileUtils:
         pass
 
     @classmethod
-    def validate_audio_file(
-        cls, file_path: str, max_size_mb: int = 500
-    ) -> Tuple[bool, str]:
-        """Validate audio file format and size"""
+    def sanitize_upload_filename(cls, filename: Optional[str], fallback_stem: str = "upload") -> str:
+        safe_filename = InputValidator.sanitize_filename(filename or "")
+        if not safe_filename or safe_filename == "unnamed":
+            return f"{fallback_stem}.bin"
+        return safe_filename
+
+    @classmethod
+    def build_temp_upload_path(cls, filename: str, temp_dir: str) -> str:
+        temp_dir_path = Path(temp_dir).resolve()
+        temp_path = (temp_dir_path / filename).resolve()
+        if temp_dir_path not in temp_path.parents:
+            raise ValueError("Invalid filename")
+        return str(temp_path)
+
+    @classmethod
+    def validate_audio_file(cls, file_path: str, max_size_mb: int = 500) -> Tuple[bool, str]:
+        """Validate audio file extension, size, and content signature."""
         try:
-            # Check if file exists
             if not os.path.exists(file_path):
                 return False, "File does not exist"
 
-            # Check file extension
             _, file_extension = os.path.splitext(file_path)
             file_extension = file_extension.replace(".", "").lower()
 
@@ -140,10 +160,70 @@ class FileUtils:
                     f"Supported formats: {', '.join(cls.AUDIO_EXTENSIONS.keys())}",
                 )
 
+            max_size_bytes = int(max_size_mb) * 1024 * 1024
+            if os.path.getsize(file_path) > max_size_bytes:
+                return False, f"File exceeds maximum size of {max_size_mb} MB"
+
+            if not cls._is_safe_audio_content(file_path, file_extension):
+                return False, "File content does not match a supported audio format"
+
             return True, "File is valid"
 
         except FILE_UTILS_ERRORS as e:
             return False, f"Error validating file: {str(e)}"
+
+    @classmethod
+    def _is_safe_audio_content(cls, file_path: str, file_extension: str) -> bool:
+        head = b""
+        chunk_size = 64 * 1024
+        max_pattern_len = max(len(pattern) for pattern in cls.DANGEROUS_FILE_PATTERNS)
+        tail = b""
+
+        with open(file_path, "rb") as file_handle:
+            while True:
+                chunk = file_handle.read(chunk_size)
+                if not chunk:
+                    break
+
+                if not head:
+                    head = chunk[:4096]
+
+                scan = (tail + chunk).lower()
+                for pattern in cls.DANGEROUS_FILE_PATTERNS:
+                    if pattern.lower() in scan:
+                        return False
+
+                tail = scan[-(max_pattern_len - 1):] if max_pattern_len > 1 else b""
+
+        return cls._matches_audio_signature(file_extension, head, file_path)
+
+    @classmethod
+    def _matches_audio_signature(cls, file_extension: str, head: bytes, file_path: str) -> bool:
+        if not head:
+            return False
+
+        signature_checks = {
+            "wav": lambda data: data.startswith(b"RIFF"),
+            "mp3": lambda data: data.startswith(b"ID3") or (len(data) > 1 and data[0] == 0xFF and (data[1] & 0xE0) == 0xE0),
+            "m4a": lambda data: b"ftyp" in data[:32],
+            "aac": lambda data: len(data) > 1 and data[0] == 0xFF and (data[1] & 0xF6) == 0xF0,
+            "ogg": lambda data: data.startswith(b"OggS"),
+            "flac": lambda data: data.startswith(b"fLaC"),
+            "webm": lambda data: data.startswith(b"\x1A\x45\xDF\xA3"),
+        }
+
+        check = signature_checks.get(file_extension)
+        if check is not None and check(head):
+            return True
+
+        if MUTAGEN_AVAILABLE:
+            try:
+                audio_file = MutagenFile(file_path)
+                return bool(audio_file and getattr(audio_file, "info", None))
+            except Exception:
+                return False
+
+        return False
 
     @classmethod
     def save_upload_to_temp(cls, upload_file, dest_path: str, max_bytes: int = 1073741824) -> None:

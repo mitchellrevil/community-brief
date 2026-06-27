@@ -11,7 +11,7 @@ from app.services.jobs.job_upload_service import JobUploadService
 from app.utils.file_utils import FileUtils
 
 
-def _upload(filename: str = "recording.txt", content: bytes = b"hello") -> UploadFile:
+def _upload(filename: str = "recording.wav", content: bytes = b"RIFF" + b"\x00" * 128) -> UploadFile:
     return UploadFile(filename=filename, file=BytesIO(content))
 
 
@@ -48,7 +48,7 @@ async def test_create_job_from_upload_saves_file_creates_job_and_tracks_analytic
         nonlocal captured_path
         captured_path = file_path
         assert os.path.exists(file_path)
-        assert original_filename == "recording.txt"
+        assert original_filename == "recording.wav"
         assert owner_user == current_user
         assert metadata["prompt_category_id"] == "cat-1"
         assert metadata["pre_session_form_data"] == {"client": "web"}
@@ -77,7 +77,7 @@ async def test_create_job_from_upload_saves_file_creates_job_and_tracks_analytic
     assert kwargs["job_id"] == "job-123"
     assert kwargs["user_id"] == current_user["id"]
     assert kwargs["event_type"] == "job_created"
-    assert kwargs["metadata"]["file_name"] == "recording.txt"
+    assert kwargs["metadata"]["file_name"] == "recording.wav"
     assert kwargs["metadata"]["prompt_category_id"] == "cat-1"
 
 
@@ -147,3 +147,32 @@ async def test_create_job_from_upload_does_not_fail_when_analytics_runtime_error
 
     await asyncio.sleep(0.01)
     assert result["id"] == "job-123"
+
+
+@pytest.mark.asyncio
+async def test_create_job_from_upload_contains_traversal_filename_within_temp_dir(
+    current_user,
+    job_service,
+    analytics_service,
+    prompt_service,
+):
+    captured_path = None
+    captured_name = None
+
+    async def upload_and_create_job(file_path, original_filename, owner_user, metadata):
+        nonlocal captured_path, captured_name
+        captured_path = file_path
+        captured_name = original_filename
+        return {"id": "job-123", "status": "uploaded"}
+
+    job_service.upload_and_create_job.side_effect = upload_and_create_job
+    service = JobUploadService(job_service, analytics_service, prompt_service)
+
+    await service.create_job_from_upload(
+        file=_upload(filename="..\\..\\payload.wav"),
+        current_user=current_user,
+    )
+
+    assert captured_path is not None
+    assert ".." not in captured_path
+    assert captured_name == "payload.wav"

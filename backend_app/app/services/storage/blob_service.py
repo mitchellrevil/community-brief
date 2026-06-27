@@ -118,7 +118,25 @@ class StorageService:
             )
             return None
 
-    async def generate_upload_sas(self, original_filename: str) -> dict:
+    @staticmethod
+    def _sanitize_blob_segment(value: str) -> str:
+        return "".join(char if char.isalnum() or char in {"-", "_"} else "_" for char in (value or ""))
+
+    def _sanitize_storage_filename(self, original_filename: str) -> str:
+        return (original_filename or "upload.bin").replace(" ", "_")
+
+    def _build_direct_upload_blob_name(self, original_filename: str, owner_user_id: str) -> str:
+        sanitized_filename = self._sanitize_storage_filename(original_filename)
+        owner_segment = self._sanitize_blob_segment(owner_user_id or "anonymous") or "anonymous"
+        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
+        timestamp = datetime.now(UTC).strftime("%H%M%S_%f")[:-3]
+        file_name_without_ext = os.path.splitext(sanitized_filename)[0]
+        return (
+            f"direct/{owner_segment}/{current_date}/"
+            f"{file_name_without_ext}_{timestamp}/{sanitized_filename}"
+        )
+
+    async def generate_upload_sas(self, original_filename: str, owner_user_id: str) -> dict:
         """Generate a write-only SAS URL for direct client-to-blob upload.
 
         Returns a dict with ``blob_url``, ``sas_url`` (full URL with token),
@@ -126,13 +144,7 @@ class StorageService:
         the browser and later reference the blob.
         """
         container_name = self.config.azure_storage_recordings_container
-
-        # Build the same blob path as upload_file() for consistency
-        sanitized_filename = original_filename.replace(" ", "_")
-        current_date = datetime.now(UTC).strftime("%Y-%m-%d")
-        timestamp = datetime.now(UTC).strftime("%H%M%S_%f")[:-3]
-        file_name_without_ext = os.path.splitext(sanitized_filename)[0]
-        blob_name = f"{current_date}/{file_name_without_ext}_{timestamp}/{sanitized_filename}"
+        blob_name = self._build_direct_upload_blob_name(original_filename, owner_user_id)
 
         parsed = urlparse(self.config.azure_storage_account_url)
         account_name = parsed.netloc.split(".")[0]
@@ -182,6 +194,33 @@ class StorageService:
             "container": container_name,
             "expiry": expiry_time.isoformat(),
         }
+
+    def is_expected_direct_upload_blob(
+        self,
+        *,
+        blob_url: str,
+        original_filename: str,
+        owner_user_id: str,
+    ) -> bool:
+        if not blob_url:
+            return False
+
+        parsed_url = urlparse(blob_url)
+        expected_account = urlparse(self.config.azure_storage_account_url).netloc
+        path_parts = parsed_url.path.strip("/").split("/")
+        if parsed_url.netloc != expected_account or len(path_parts) < 5:
+            return False
+
+        container_name = path_parts[0]
+        blob_name = "/".join(path_parts[1:])
+        expected_prefix = f"direct/{self._sanitize_blob_segment(owner_user_id or 'anonymous')}/"
+        expected_filename = self._sanitize_storage_filename(original_filename)
+
+        return (
+            container_name == self.config.azure_storage_recordings_container
+            and blob_name.startswith(expected_prefix)
+            and blob_name.endswith(f"/{expected_filename}")
+        )
 
     async def verify_blob_exists(self, blob_url: str) -> int:
         """Verify a blob exists and return its size in bytes.

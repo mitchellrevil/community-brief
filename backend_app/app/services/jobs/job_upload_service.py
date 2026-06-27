@@ -66,12 +66,17 @@ class JobUploadService:
             prompt_subcategory_id=prompt_subcategory_id,
         )
 
-        tmp_dir = tempfile.mkdtemp(prefix="community_upload_")
-        tmp_path = os.path.join(tmp_dir, file.filename)
+        tmp_dir = tempfile.mkdtemp(prefix="sonic_upload_")
+        safe_filename = FileUtils.sanitize_upload_filename(
+            file.filename,
+            fallback_stem=f"upload_{(user_id or 'unknown')[:8]}",
+        )
+        tmp_path = self._build_temp_upload_path(filename=safe_filename, tmp_dir=tmp_dir)
 
         await self._acquire_upload_slot(user_id)
         try:
             self._save_upload(file, tmp_path, user_id)
+            self._validate_saved_audio(tmp_path)
             metadata = self._build_metadata(
                 file=file,
                 tmp_path=tmp_path,
@@ -81,7 +86,7 @@ class JobUploadService:
             )
             created_job = await self.job_service.upload_and_create_job(
                 tmp_path,
-                file.filename,
+                safe_filename,
                 current_user,
                 metadata=metadata,
             )
@@ -144,12 +149,26 @@ class JobUploadService:
     def _release_upload_slot(self) -> None:
         self.upload_semaphore.release()
 
+    def _build_temp_upload_path(self, *, filename: str, tmp_dir: str) -> str:
+        try:
+            return FileUtils.build_temp_upload_path(filename, tmp_dir)
+        except ValueError as exc:
+            raise ValidationError("Invalid filename", field="filename") from exc
+
     def _save_upload(self, file: UploadFile, tmp_path: str, user_id: Optional[str]) -> None:
         try:
             FileUtils.save_upload_to_temp(file, tmp_path, max_bytes=MAX_UPLOAD_BYTES)
         except FileUtils.UploadTooLargeError as exc:
             logger.warning("job_upload_file_too_large", user_id=user_id, error=str(exc))
             raise ApplicationError(str(exc), ErrorCode.INVALID_INPUT, status_code=413) from exc
+
+    def _validate_saved_audio(self, tmp_path: str) -> None:
+        is_valid, message = FileUtils.validate_audio_file(
+            tmp_path,
+            max_size_mb=MAX_UPLOAD_BYTES // (1024 * 1024),
+        )
+        if not is_valid:
+            raise ValidationError(message, field="filename")
 
     def _build_metadata(
         self,

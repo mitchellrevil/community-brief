@@ -4,7 +4,6 @@ import asyncio
 import json
 import os
 import tempfile
-from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import UploadFile
@@ -22,7 +21,6 @@ from ...services.interfaces import AnalyticsServiceInterface, PromptServiceInter
 from ...services.jobs.job_service import JobService
 from ...services.storage.blob_service import StorageService
 from ...utils.file_utils import FileUtils
-from ...utils.input_validation import InputValidator
 
 logger = get_logger(__name__)
 
@@ -96,7 +94,7 @@ class UploadWorkflowService:
                 status_code=413,
             )
 
-        sas_info = await self.storage_service.generate_upload_sas(safe_filename)
+        sas_info = await self.storage_service.generate_upload_sas(safe_filename, user_id)
         return {
             "sas_url": sas_info["sas_url"],
             "blob_url": sas_info["blob_url"],
@@ -121,6 +119,12 @@ class UploadWorkflowService:
     ) -> Dict[str, Any]:
         user_id = current_user.get("id")
         safe_filename = self._safe_filename(filename, user_id)
+        if not self.storage_service.is_expected_direct_upload_blob(
+            blob_url=blob_url,
+            original_filename=safe_filename,
+            owner_user_id=user_id,
+        ):
+            raise ValidationError("Invalid upload reference.", field="blob_url")
 
         await validate_prompt_subcategory_usage(
             prompt_service=self.prompt_service,
@@ -139,6 +143,14 @@ class UploadWorkflowService:
         )
 
         try:
+            blob_size = await self.storage_service.verify_blob_exists(blob_url)
+            if blob_size > MAX_FILE_SIZE_BYTES:
+                raise ApplicationError(
+                    f"File too large. Maximum allowed size is {MAX_FILE_SIZE_BYTES // (1024 * 1024)} MB.",
+                    ErrorCode.INVALID_INPUT,
+                    status_code=413,
+                )
+            await self._validate_direct_upload_audio(blob_url=blob_url, filename=safe_filename, user_id=user_id)
             created_job = await self.job_service.create_job_from_blob(
                 blob_url=blob_url,
                 original_filename=safe_filename,
@@ -179,15 +191,15 @@ class UploadWorkflowService:
         )
 
         safe_filename = self._safe_filename(file.filename, user_id)
-        tmp_dir = tempfile.mkdtemp(prefix="community_upload_")
-        tmp_path = os.path.join(tmp_dir, safe_filename)
+        tmp_dir = tempfile.mkdtemp(prefix="sonic_upload_")
+        tmp_path = self._build_temp_upload_path(filename=safe_filename, tmp_dir=tmp_dir)
         acquired_slot = False
 
         try:
             await self._acquire_upload_slot(user_id)
             acquired_slot = True
-            self._validate_temp_path(tmp_path=tmp_path, tmp_dir=tmp_dir, user_id=user_id, file=file)
             self._save_upload(file=file, tmp_path=tmp_path, user_id=user_id)
+            self._validate_saved_audio(tmp_path=tmp_path)
             metadata = self._build_multipart_metadata(
                 prompt_category_id=prompt_category_id,
                 prompt_subcategory_id=prompt_subcategory_id,
@@ -218,11 +230,14 @@ class UploadWorkflowService:
             self._cleanup_temp_upload(tmp_path, tmp_dir)
 
     def _safe_filename(self, filename: Optional[str], user_id: Optional[str]) -> str:
-        safe_filename = InputValidator.sanitize_filename(filename or "")
-        if not safe_filename or safe_filename == "unnamed":
-            suffix = (user_id or "unknown")[:8]
-            safe_filename = f"upload_{suffix}.bin"
-        return safe_filename
+        suffix = (user_id or "unknown")[:8]
+        return FileUtils.sanitize_upload_filename(filename, fallback_stem=f"upload_{suffix}")
+
+    def _build_temp_upload_path(self, *, filename: str, tmp_dir: str) -> str:
+        try:
+            return FileUtils.build_temp_upload_path(filename, tmp_dir)
+        except ValueError as exc:
+            raise ValidationError("Invalid filename", field="filename") from exc
 
     def _build_direct_metadata(
         self,
@@ -297,25 +312,37 @@ class UploadWorkflowService:
     def _release_upload_slot(self) -> None:
         self.upload_semaphore.release()
 
-    def _validate_temp_path(self, *, tmp_path: str, tmp_dir: str, user_id: Optional[str], file: UploadFile) -> None:
-        resolved_tmp = Path(tmp_path).resolve()
-        resolved_dir = Path(tmp_dir).resolve()
-        if not str(resolved_tmp).startswith(str(resolved_dir)):
-            logger.error(
-                "upload_path_traversal_detected",
-                user_id=user_id,
-                original_filename=file.filename,
-                tmp_dir=tmp_dir,
-                tmp_path=tmp_path,
-            )
-            raise ValidationError("Invalid filename", field="filename")
-
     def _save_upload(self, *, file: UploadFile, tmp_path: str, user_id: Optional[str]) -> None:
         try:
             FileUtils.save_upload_to_temp(file, tmp_path, max_bytes=MAX_FILE_SIZE_BYTES)
         except FileUtils.UploadTooLargeError as exc:
             logger.warning("upload_rejected_too_large", user_id=user_id, error=str(exc))
             raise ApplicationError(str(exc), ErrorCode.INVALID_INPUT, status_code=413) from exc
+
+    def _validate_saved_audio(self, *, tmp_path: str) -> None:
+        is_valid, message = FileUtils.validate_audio_file(
+            tmp_path,
+            max_size_mb=MAX_FILE_SIZE_BYTES // (1024 * 1024),
+        )
+        if not is_valid:
+            raise ValidationError(message, field="filename")
+
+    async def _validate_direct_upload_audio(
+        self,
+        *,
+        blob_url: str,
+        filename: str,
+        user_id: Optional[str],
+    ) -> None:
+        tmp_dir = tempfile.mkdtemp(prefix="sonic_direct_upload_")
+        tmp_path = self._build_temp_upload_path(filename=filename, tmp_dir=tmp_dir)
+        try:
+            with open(tmp_path, "wb") as temp_file:
+                async for chunk in self.storage_service.stream_blob_content(blob_url):
+                    temp_file.write(chunk)
+            self._validate_saved_audio(tmp_path=tmp_path)
+        finally:
+            self._cleanup_temp_upload(tmp_path, tmp_dir)
 
     def _add_audio_duration_metadata(self, *, filename: str, tmp_path: str, metadata: Dict[str, Any]) -> None:
         file_ext = FileUtils.get_extension(filename)

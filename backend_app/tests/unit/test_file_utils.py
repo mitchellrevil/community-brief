@@ -106,6 +106,18 @@ class TestValidateAudioFile:
         is_valid, message = FileUtils.validate_audio_file(str(mp3_file))
         
         assert is_valid is True
+
+    def test_rejects_renamed_text_file(self, tmp_path):
+        """Given text content with an audio extension, when validating, then returns False."""
+        from app.utils.file_utils import FileUtils
+
+        fake_wav = tmp_path / "fake.wav"
+        fake_wav.write_text("not audio")
+
+        is_valid, message = FileUtils.validate_audio_file(str(fake_wav))
+
+        assert is_valid is False
+        assert "content" in message.lower()
     
     def test_rejects_unsupported_format(self, tmp_path):
         """Given unsupported file format, when validating, then returns False."""
@@ -133,7 +145,7 @@ class TestValidateAudioFile:
         from app.utils.file_utils import FileUtils
         
         m4a_file = tmp_path / "test.m4a"
-        m4a_file.write_bytes(b"\x00" * 100)
+        m4a_file.write_bytes(b"\x00\x00\x00\x18ftypM4A " + b"\x00" * 92)
         
         is_valid, message = FileUtils.validate_audio_file(str(m4a_file))
         

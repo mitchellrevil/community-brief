@@ -233,6 +233,26 @@ class TestDownload:
 
 @pytest.mark.asyncio
 class TestUpload:
+    async def test_generate_upload_sas_binds_blob_path_to_user(self, storage_service):
+        with patch("app.services.storage.blob_service.generate_blob_sas", return_value="sas-token"):
+            result = await storage_service.generate_upload_sas("my clip.wav", "user-123")
+
+        assert "/recordings/direct/user-123/" in result["blob_url"]
+        assert result["blob_url"].endswith("/my_clip.wav")
+        assert result["sas_url"].endswith("?sas-token")
+
+    async def test_is_expected_direct_upload_blob_rejects_wrong_owner(self, storage_service):
+        blob_url = (
+            "https://test.blob.core.windows.net/recordings/"
+            "direct/other-user/2026-06-27/clip_120000_000/my_clip.wav"
+        )
+
+        assert storage_service.is_expected_direct_upload_blob(
+            blob_url=blob_url,
+            original_filename="my clip.wav",
+            owner_user_id="user-123",
+        ) is False
+
     async def test_upload_file(self, storage_service):
         mock_container = MagicMock()
         mock_blob = MagicMock()
