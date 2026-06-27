@@ -60,6 +60,23 @@ async def test_clear_history_removes_history_and_response_id(service, job_reposi
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "kwargs"),
+    [
+        ("save_message", {"role": "user", "content": "hello"}),
+        ("get_history", {}),
+        ("clear_history", {}),
+    ],
+)
+async def test_chat_history_methods_use_provided_job_without_refetch(service, job_repository, method_name, kwargs):
+    job = {"id": "job-1", "type": "job", "chat_history": []}
+
+    await getattr(service, method_name)("job-1", job=job, **kwargs)
+
+    job_repository.get_by_id.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_store_response_id_updates_job(service, job_repository):
     job = {"id": "job-1", "type": "job"}
     job_repository.get_by_id.return_value = job

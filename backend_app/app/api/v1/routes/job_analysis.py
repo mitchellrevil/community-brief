@@ -60,7 +60,12 @@ async def save_chat_message(
     current_user: dict[str, Any] = Depends(get_current_user),
     workflow_service: JobAnalysisWorkflowService = Depends(get_job_analysis_workflow_service),
 ) -> JSONResponse:
-    return await workflow_service.save_chat_message(job_id=job_id, role=role, content=content)
+    return await workflow_service.save_chat_message(
+        job_id=job_id,
+        role=role,
+        content=content,
+        current_user=current_user,
+    )
 
 
 @router.get("/{job_id}/chat/history")
@@ -69,7 +74,7 @@ async def get_chat_history(
     current_user: dict[str, Any] = Depends(get_current_user),
     workflow_service: JobAnalysisWorkflowService = Depends(get_job_analysis_workflow_service),
 ) -> JSONResponse:
-    return await workflow_service.get_chat_history(job_id=job_id)
+    return await workflow_service.get_chat_history(job_id=job_id, current_user=current_user)
 
 
 @router.delete("/{job_id}/chat/history")
@@ -78,7 +83,7 @@ async def clear_chat_history(
     current_user: dict[str, Any] = Depends(get_current_user),
     workflow_service: JobAnalysisWorkflowService = Depends(get_job_analysis_workflow_service),
 ) -> JSONResponse:
-    return await workflow_service.clear_chat_history(job_id=job_id)
+    return await workflow_service.clear_chat_history(job_id=job_id, current_user=current_user)
 
 
 @router.post("/{job_id}/reprocess", response_model=None)

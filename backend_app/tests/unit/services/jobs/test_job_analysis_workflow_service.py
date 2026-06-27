@@ -50,20 +50,72 @@ async def test_stream_analysis_chat_returns_streaming_response():
 
 
 @pytest.mark.asyncio
-async def test_chat_history_methods_shape_json_responses():
+async def test_chat_history_methods_allow_owner_and_admin():
     chat_history_service = MagicMock()
     chat_history_service.save_message = AsyncMock(return_value=1)
     chat_history_service.get_history = AsyncMock(return_value=[{"role": "user", "content": "hi"}])
     chat_history_service.clear_history = AsyncMock(return_value=None)
-    workflow = _workflow(chat_history_service=chat_history_service)
+    job = {"id": "j1", "user_id": "owner", "chat_history": [{"role": "user", "content": "hi"}]}
 
-    assert isinstance(await workflow.save_chat_message(job_id="j1", role="user", content="hello"), JSONResponse)
-    assert isinstance(await workflow.get_chat_history(job_id="j1"), JSONResponse)
-    assert isinstance(await workflow.clear_chat_history(job_id="j1"), JSONResponse)
+    for current_user in ({"id": "owner"}, {"id": "admin", "permission": "admin"}):
+        job_service = MagicMock()
+        job_service.get_job = AsyncMock(return_value=job)
+        workflow = _workflow(chat_history_service=chat_history_service, job_service=job_service)
 
-    chat_history_service.save_message.assert_awaited_once_with("j1", role="user", content="hello")
-    chat_history_service.get_history.assert_awaited_once_with("j1")
-    chat_history_service.clear_history.assert_awaited_once_with("j1")
+        assert isinstance(
+            await workflow.save_chat_message(
+                job_id="j1",
+                role="user",
+                content="hello",
+                current_user=current_user,
+            ),
+            JSONResponse,
+        )
+        assert isinstance(
+            await workflow.get_chat_history(job_id="j1", current_user=current_user),
+            JSONResponse,
+        )
+        assert isinstance(
+            await workflow.clear_chat_history(job_id="j1", current_user=current_user),
+            JSONResponse,
+        )
+
+    assert chat_history_service.save_message.await_count == 2
+    chat_history_service.get_history.await_count == 2
+    assert chat_history_service.clear_history.await_count == 2
+    chat_history_service.save_message.assert_any_await("j1", job=job, role="user", content="hello")
+    chat_history_service.get_history.assert_any_await("j1", job=job)
+    chat_history_service.clear_history.assert_any_await("j1", job=job)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "kwargs"),
+    [
+        ("save_chat_message", {"role": "user", "content": "hello"}),
+        ("get_chat_history", {}),
+        ("clear_chat_history", {}),
+    ],
+)
+async def test_chat_history_methods_reject_unrelated_user(method_name, kwargs):
+    chat_history_service = MagicMock()
+    chat_history_service.save_message = AsyncMock()
+    chat_history_service.get_history = AsyncMock()
+    chat_history_service.clear_history = AsyncMock()
+    job_service = MagicMock()
+    job_service.get_job = AsyncMock(return_value={"id": "j1", "user_id": "owner"})
+    workflow = _workflow(chat_history_service=chat_history_service, job_service=job_service)
+
+    with pytest.raises(PermissionError):
+        await getattr(workflow, method_name)(
+            job_id="j1",
+            current_user={"id": "intruder"},
+            **kwargs,
+        )
+
+    chat_history_service.save_message.assert_not_awaited()
+    chat_history_service.get_history.assert_not_awaited()
+    chat_history_service.clear_history.assert_not_awaited()
 
 
 @pytest.mark.asyncio

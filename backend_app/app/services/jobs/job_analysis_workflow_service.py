@@ -69,20 +69,57 @@ class JobAnalysisWorkflowService:
             headers=STREAM_HEADERS,
         )
 
-    async def save_chat_message(self, *, job_id: str, role: str, content: str) -> JSONResponse:
+    async def _get_authorized_job(
+        self,
+        *,
+        job_id: str,
+        current_user: dict[str, Any],
+        required_permission: str,
+    ) -> dict[str, Any]:
+        job = await self.job_service.get_job(job_id)
+        if not job:
+            raise ResourceNotFoundError("Job", job_id)
+        if not check_job_access(job, current_user, required_permission):
+            raise PermissionError("Access denied to job")
+        return job
+
+    async def save_chat_message(
+        self,
+        *,
+        job_id: str,
+        role: str,
+        content: str,
+        current_user: dict[str, Any],
+    ) -> JSONResponse:
+        job = await self._get_authorized_job(
+            job_id=job_id,
+            current_user=current_user,
+            required_permission="edit",
+        )
         chat_history_length = await self.chat_history_service.save_message(
             job_id,
+            job=job,
             role=role,
             content=content,
         )
         return JSONResponse({"status": "saved", "chat_history_length": chat_history_length})
 
-    async def get_chat_history(self, *, job_id: str) -> JSONResponse:
-        chat_history = await self.chat_history_service.get_history(job_id)
+    async def get_chat_history(self, *, job_id: str, current_user: dict[str, Any]) -> JSONResponse:
+        job = await self._get_authorized_job(
+            job_id=job_id,
+            current_user=current_user,
+            required_permission="view",
+        )
+        chat_history = await self.chat_history_service.get_history(job_id, job=job)
         return JSONResponse({"chat_history": chat_history})
 
-    async def clear_chat_history(self, *, job_id: str) -> JSONResponse:
-        await self.chat_history_service.clear_history(job_id)
+    async def clear_chat_history(self, *, job_id: str, current_user: dict[str, Any]) -> JSONResponse:
+        job = await self._get_authorized_job(
+            job_id=job_id,
+            current_user=current_user,
+            required_permission="edit",
+        )
+        await self.chat_history_service.clear_history(job_id, job=job)
         return JSONResponse({"status": "cleared", "message": "Chat history cleared"})
 
     async def reprocess_job_analysis(

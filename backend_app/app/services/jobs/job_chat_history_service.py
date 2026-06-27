@@ -19,8 +19,18 @@ class JobChatHistoryService:
             raise ResourceNotFoundError("Job", job_id)
         return job
 
-    async def save_message(self, job_id: str, *, role: str, content: str) -> int:
-        job = await self.get_job(job_id)
+    async def _resolve_job(self, job_id: str, job: Dict[str, Any] | None) -> Dict[str, Any]:
+        return job if job is not None else await self.get_job(job_id)
+
+    async def save_message(
+        self,
+        job_id: str,
+        *,
+        role: str,
+        content: str,
+        job: Dict[str, Any] | None = None,
+    ) -> int:
+        job = await self._resolve_job(job_id, job)
         chat_history = job.setdefault("chat_history", [])
         chat_history.append(
             {
@@ -32,12 +42,12 @@ class JobChatHistoryService:
         await self.repository.replace(job_id, job)
         return len(chat_history)
 
-    async def get_history(self, job_id: str) -> List[Dict[str, Any]]:
-        job = await self.get_job(job_id)
+    async def get_history(self, job_id: str, *, job: Dict[str, Any] | None = None) -> List[Dict[str, Any]]:
+        job = await self._resolve_job(job_id, job)
         return job.get("chat_history", [])
 
-    async def clear_history(self, job_id: str) -> None:
-        job = await self.get_job(job_id)
+    async def clear_history(self, job_id: str, *, job: Dict[str, Any] | None = None) -> None:
+        job = await self._resolve_job(job_id, job)
         job["chat_history"] = []
         job.pop("chat_response_id", None)
         await self.repository.replace(job_id, job)

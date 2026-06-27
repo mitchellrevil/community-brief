@@ -46,13 +46,14 @@ async def test_chat_history_routes_delegate_to_workflow():
     workflow.save_chat_message.return_value = JSONResponse({"status": "saved"})
     workflow.get_chat_history.return_value = JSONResponse({"chat_history": []})
     workflow.clear_chat_history.return_value = JSONResponse({"status": "cleared"})
+    current_user = {"id": "u1"}
 
     assert isinstance(
         await job_analysis.save_chat_message(
             "j1",
             role="user",
             content="hello",
-            current_user={"id": "u1"},
+            current_user=current_user,
             workflow_service=workflow,
         ),
         JSONResponse,
@@ -60,7 +61,7 @@ async def test_chat_history_routes_delegate_to_workflow():
     assert isinstance(
         await job_analysis.get_chat_history(
             "j1",
-            current_user={"id": "u1"},
+            current_user=current_user,
             workflow_service=workflow,
         ),
         JSONResponse,
@@ -68,15 +69,20 @@ async def test_chat_history_routes_delegate_to_workflow():
     assert isinstance(
         await job_analysis.clear_chat_history(
             "j1",
-            current_user={"id": "u1"},
+            current_user=current_user,
             workflow_service=workflow,
         ),
         JSONResponse,
     )
 
-    workflow.save_chat_message.assert_awaited_once_with(job_id="j1", role="user", content="hello")
-    workflow.get_chat_history.assert_awaited_once_with(job_id="j1")
-    workflow.clear_chat_history.assert_awaited_once_with(job_id="j1")
+    workflow.save_chat_message.assert_awaited_once_with(
+        job_id="j1",
+        role="user",
+        content="hello",
+        current_user=current_user,
+    )
+    workflow.get_chat_history.assert_awaited_once_with(job_id="j1", current_user=current_user)
+    workflow.clear_chat_history.assert_awaited_once_with(job_id="j1", current_user=current_user)
 
 
 @pytest.mark.asyncio
