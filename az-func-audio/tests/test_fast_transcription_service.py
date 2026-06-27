@@ -203,6 +203,28 @@ class TestSubmissionAndStatus:
         with pytest.raises(TranscriptionServiceError, match="Transcription failed"):
             service.check_status("batch_12345", timeout=1, interval=0)
 
+    def test_check_status_logs_batch_progress(self, monkeypatch, service: FastTranscriptionService):
+        service.session.request = Mock(
+            side_effect=[
+                _mock_response(200, {"status": "Running"}),
+                _mock_response(200, {"status": "Succeeded"}),
+            ]
+        )
+        service.logger = Mock()
+        times = iter([0, 0, 5])
+        monkeypatch.setattr("services.fast_transcription_service.time.time", lambda: next(times))
+        monkeypatch.setattr("services.fast_transcription_service.time.sleep", lambda _interval: None)
+
+        result = service.check_status("batch_12345", timeout=30, interval=0)
+
+        assert result["status"] == "Succeeded"
+        service.logger.info.assert_any_call(
+            "transcription_batch_status",
+            transcription_id="batch_12345",
+            status="running",
+            elapsed_seconds=0,
+        )
+
 
 class TestResults:
     def test_get_results_prefers_transcription_artifact(self, service: FastTranscriptionService):

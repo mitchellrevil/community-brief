@@ -23,6 +23,7 @@ from services.artifact_naming import (
     is_reprocess_artifact,
     is_system_generated_file,
 )
+from utils.file_types import get_file_type
 
 
 logger = get_logger(__name__)
@@ -115,10 +116,7 @@ class BlobProcessingService:
             if not cosmos_service:
                 return
 
-            analysis_service = self.analysis_service_factory()
-            storage_service = self.storage_service_factory()
-            file_processing_service = FileProcessingService(config)
-            file_type = file_processing_service.get_file_type(blob_extension)
+            file_type = get_file_type(blob_extension)
 
             if file_type == "unsupported":
                 self.logger.warning(
@@ -128,20 +126,6 @@ class BlobProcessingService:
                     blob_path=blob_path,
                 )
                 return
-
-            path_without_container = blob_path_without_extension[
-                len(config.storage_recordings_container) + 1:
-            ]
-            blob_url = f"{config.storage_account_url}/{myblob.name}"
-
-            self.logger.info(
-                "blob.processing.file_selected",
-                correlation_id=correlation_id,
-                file_type=file_type,
-                file_extension=blob_extension,
-                blob_path=blob_path,
-                path_without_container=path_without_container,
-            )
 
             file_doc = await self.resolve_file_document(
                 myblob,
@@ -182,6 +166,31 @@ class BlobProcessingService:
                     status=current_status,
                 )
                 return
+
+            cosmos_service.update_job_status(job_id, JobStatus.TRANSCRIBING)
+            self.logger.info(
+                "blob.processing.status_marked_transcribing",
+                correlation_id=correlation_id,
+                job_id=job_id,
+                file_type=file_type,
+            )
+
+            analysis_service = self.analysis_service_factory()
+            storage_service = self.storage_service_factory()
+            file_processing_service = FileProcessingService(config)
+            path_without_container = blob_path_without_extension[
+                len(config.storage_recordings_container) + 1:
+            ]
+            blob_url = f"{config.storage_account_url}/{myblob.name}"
+
+            self.logger.info(
+                "blob.processing.file_selected",
+                correlation_id=correlation_id,
+                file_type=file_type,
+                file_extension=blob_extension,
+                blob_path=blob_path,
+                path_without_container=path_without_container,
+            )
 
             self.logger.debug(
                 "blob.processing.file_document_metadata",

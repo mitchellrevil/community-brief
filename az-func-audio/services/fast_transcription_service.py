@@ -63,6 +63,7 @@ class FastTranscriptionService:
     RESULT_REQUEST_TIMEOUT = 60
     DEFAULT_STATUS_TIMEOUT = 18000
     DEFAULT_POLL_INTERVAL = 5
+    STATUS_LOG_INTERVAL_SECONDS = 60
 
     def __init__(
         self,
@@ -468,6 +469,8 @@ class FastTranscriptionService:
         headers = self._get_headers(TranscriptionAPI.BATCH)
         status_url = f"{self.batch_endpoint}/transcriptions/{transcription_id}"
         start_time = time.time()
+        last_logged_status = None
+        last_logged_elapsed = -self.STATUS_LOG_INTERVAL_SECONDS
 
         while True:
             elapsed = time.time() - start_time
@@ -485,6 +488,18 @@ class FastTranscriptionService:
                 expected_statuses=(200,),
             )
             status = str(status_data.get("status", "")).lower()
+            if (
+                status != last_logged_status
+                or elapsed - last_logged_elapsed >= self.STATUS_LOG_INTERVAL_SECONDS
+            ):
+                self.logger.info(
+                    "transcription_batch_status",
+                    transcription_id=transcription_id,
+                    status=status or "unknown",
+                    elapsed_seconds=int(elapsed),
+                )
+                last_logged_status = status
+                last_logged_elapsed = elapsed
 
             if status == "succeeded":
                 return status_data

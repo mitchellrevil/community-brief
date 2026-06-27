@@ -389,7 +389,7 @@ class TestBlobMetadataLookup:
             )
         
         # Check that fast path was logged
-        log_messages = [record.message for record in caplog.records]
+        log_messages = [record.getMessage() for record in caplog.records]
         assert any("metadata" in msg.lower() or "fast" in msg.lower() for msg in log_messages), \
             f"Expected log about metadata lookup, got: {log_messages}"
 
