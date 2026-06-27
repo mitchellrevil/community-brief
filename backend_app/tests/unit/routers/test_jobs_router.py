@@ -361,6 +361,52 @@ class TestGetJobAnalysisDocument:
         storage_svc.generate_docx_bytes.assert_not_called()
 
 
+class TestUpdateJobAnalysisDocument:
+    """Tests for analysis document editing endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_updates_markdown_analysis_document(self, mock_current_user):
+        analysis_path = "https://storage.blob.core.windows.net/uploads/analysis.md"
+        job = {
+            "id": "job-123",
+            "user_id": "user-123",
+            "status": "completed",
+            "analysis_file_path": analysis_path,
+        }
+        job_svc = AsyncMock()
+        job_svc.get_job.return_value = job
+        job_svc.update_analysis_text.return_value = {
+            **job,
+            "analysis_text": "# Updated",
+            "updated_at": "2026-06-27T12:00:00+00:00",
+        }
+        storage_svc = AsyncMock()
+
+        result = await jobs_router.update_job_analysis_document(
+            job_id="job-123",
+            update_request=jobs_router.AnalysisDocumentUpdateRequest(
+                markdown_content="# Updated",
+                analysis_file_path=f"{analysis_path}?sv=sas",
+            ),
+            current_user=mock_current_user,
+            job_svc=job_svc,
+            storage_service=storage_svc,
+        )
+
+        assert result == {
+            "status": "success",
+            "message": "Analysis document updated",
+            "document_url": analysis_path,
+            "updated_at": "2026-06-27T12:00:00+00:00",
+        }
+        storage_svc.upload_text_to_blob.assert_awaited_once_with(
+            analysis_path,
+            "# Updated",
+            content_type="text/markdown; charset=utf-8",
+        )
+        job_svc.update_analysis_text.assert_awaited_once_with(job, "# Updated")
+
+
 class TestCreateJob:
     """Tests for create_job route wiring."""
 

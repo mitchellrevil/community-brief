@@ -2,7 +2,7 @@
 
 import re
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from ..utils.input_validation import InputValidator
 
@@ -47,3 +47,8 @@ class SpeakerNamesUpdateRequest(BaseModel):
                 raise ValueError("Invalid characters in speaker name")
             normalized[clean_id] = clean_name
         return normalized
+
+
+class AnalysisDocumentUpdateRequest(BaseModel):
+    markdown_content: str = Field(max_length=500_000)
+    analysis_file_path: str | None = None

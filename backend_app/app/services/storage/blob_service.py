@@ -15,6 +15,8 @@ from ...utils.cache_utils import TTLCache
 
 BLOB_SERVICE_ERRORS = (AzureError, RuntimeError, OSError, ValueError, TypeError)
 BLOB_STREAM_ERRORS = (AzureError, RuntimeError, OSError, ValueError, TypeError)
+MARKDOWN_PARSE_ERRORS = (ValueError, TypeError, AttributeError)
+MARKDOWN_IMPORT_ERRORS = (ImportError, ModuleNotFoundError)
 
 _sas_url_cache = TTLCache[str](default_ttl=300.0)
 
@@ -685,81 +687,182 @@ class StorageService:
             add_title: Whether to add "Analysis Report" title at the top (True for new, False for edited)
         """
         try:
-            # Generate DOCX in a thread since python-docx is CPU bound/sync
             def _generate_docx():
                 from docx import Document
                 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
+                import importlib
                 import io
-                import re
 
-                # Create DOCX in memory
                 doc = Document()
-                
-                # Add title only for new documents (not edits)
                 if add_title:
                     title = doc.add_heading('Analysis Report', 0)
                     title.alignment = WD_PARAGRAPH_ALIGNMENT.CENTER
-                
-                # Process the analysis text and format properly
-                sections = analysis_text.split("\n\n")
-                
-                for section in sections:
-                    if not section.strip():
-                        continue
-                        
-                    lines = section.split("\n")
-                    if not lines:
-                        continue
-                        
-                    # Check if this is a section header - improved detection for markdown
-                    first_line = lines[0].strip()
-                    
-                    if (first_line.startswith("#") or 
-                        first_line.startswith("**") and first_line.endswith("**") or
-                        first_line.isupper() or 
-                        (len(first_line) < 100 and first_line.endswith(":")) or
-                        re.match(r'^\d+\.\s*\*\*.*\*\*', first_line)):  # Numbered sections with bold
-                        # This is likely a heading
-                        heading_text = (first_line
-                                      .replace("#", "")
-                                      .replace("**", "")  # Remove markdown bold
-                                      .strip()
-                                      .rstrip(":"))
-                        
-                        # Remove numbering if present
-                        heading_text = re.sub(r'^\d+\.\s*', '', heading_text)
-                        
-                        doc.add_heading(heading_text, level=1)
-                        
-                        # Add the rest of the lines as content
-                        content_lines = lines[1:]
-                    else:
-                        # This is regular content
-                        content_lines = lines
-                    
-                    # Process content lines
-                    for line in content_lines:
-                        line = line.strip()
-                        if not line:
-                            continue
-                            
-                        # Check if this is a bullet point
-                        if line.startswith(("-", "*", "•")) or re.match(r'^\d+\.', line):
-                            # Clean bullet text and add as bullet point
-                            bullet_text = re.sub(r'^[-*•\d+\.]\s*', '', line)
-                            # Add paragraph with formatting preserved
-                            p = doc.add_paragraph(style='List Bullet')
-                            # Simplified text adding for thread safety/simplicity
-                            p.add_run(bullet_text)
-                        else:
-                            # Add as regular paragraph with formatting preserved
-                            p = doc.add_paragraph()
-                            p.add_run(line)
-                    
-                    # Add spacing between sections
-                    doc.add_paragraph()
 
-                # Save DOCX to buffer
+                try:
+                    from markdown_it import MarkdownIt
+
+                    try:
+                        md = MarkdownIt("commonmark", {"linkify": True})
+                    except MARKDOWN_IMPORT_ERRORS:
+                        md = MarkdownIt({"linkify": True})
+
+                    for rule in ("table", "strikethrough"):
+                        try:
+                            md.enable(rule)
+                        except MARKDOWN_PARSE_ERRORS:
+                            self.logger.debug("blob_docx_markdown_rule_unavailable", rule=rule)
+
+                    tasklist_loaded = False
+                    tasklist_candidates = [
+                        ("mdit_py_plugins.tasklist", "tasklist_plugin"),
+                        ("mdit_py_plugins.tasklists", "plugin"),
+                        ("mdit_py_plugins.tasklists", "tasklist_plugin"),
+                    ]
+                    for mod_name, attr in tasklist_candidates:
+                        try:
+                            mod = importlib.import_module(mod_name)
+                            plugin = getattr(mod, attr)
+                            md.use(plugin)
+                            tasklist_loaded = True
+                            self.logger.info(
+                                "blob_docx_tasklist_plugin_loaded",
+                                module=mod_name,
+                                attribute=attr,
+                            )
+                            break
+                        except MARKDOWN_IMPORT_ERRORS:
+                            continue
+                        except MARKDOWN_PARSE_ERRORS:
+                            continue
+
+                    if not tasklist_loaded:
+                        self.logger.debug("blob_docx_tasklist_plugin_unavailable")
+
+                    tokens = md.parse(analysis_text)
+                except ModuleNotFoundError:
+                    self.logger.warning("blob_docx_markdown_dependency_missing")
+                    paragraphs = [p for p in analysis_text.split("\n\n") if p.strip()]
+                    for para in paragraphs:
+                        p = doc.add_paragraph()
+                        fake_inline = type(
+                            "InlineToken",
+                            (),
+                            {"children": [type("Child", (), {"type": "text", "content": para})]},
+                        )
+                        self._render_inline_tokens(p, fake_inline)
+
+                    buffer = io.BytesIO()
+                    doc.save(buffer)
+                    return buffer.getvalue()
+                except MARKDOWN_PARSE_ERRORS as parse_err:
+                    self.logger.error("blob_docx_markdown_parse_failed", error=str(parse_err))
+                    raise ValueError(f"Markdown parsing error: {parse_err}") from parse_err
+
+                list_stack: list[dict] = []
+
+                i = 0
+                while i < len(tokens):
+                    tok = tokens[i]
+
+                    if tok.type == 'heading_open':
+                        level = 1
+                        try:
+                            tag = tok.tag
+                            if tag and tag.startswith('h'):
+                                level = max(1, min(3, int(tag[1:])))
+                        except MARKDOWN_PARSE_ERRORS:
+                            level = 1
+
+                        text = ''
+                        if i + 1 < len(tokens) and tokens[i + 1].type == 'inline':
+                            text = self._collect_plain_text(tokens[i + 1])
+
+                        doc.add_heading(text.strip(), level=level)
+                        i += 3
+                        continue
+
+                    if tok.type == 'paragraph_open':
+                        p = doc.add_paragraph()
+                        if i + 1 < len(tokens) and tokens[i + 1].type == 'inline':
+                            self._render_inline_tokens(p, tokens[i + 1])
+                        i += 3
+                        continue
+
+                    if tok.type in ('ordered_list_open', 'bullet_list_open'):
+                        list_type = 'ordered' if tok.type == 'ordered_list_open' else 'bullet'
+                        level = len(list_stack) + 1
+                        list_stack.append({'type': list_type, 'level': level})
+                        i += 1
+                        continue
+
+                    if tok.type == 'list_item_open':
+                        current = list_stack[-1] if list_stack else {'type': 'bullet', 'level': 1}
+                        base_style = 'List Number' if current['type'] == 'ordered' else 'List Bullet'
+                        style = base_style if current['level'] == 1 else f"{base_style} {current['level']}"
+
+                        task_state = None
+                        if isinstance(getattr(tok, "meta", None), dict) and "checked" in tok.meta:
+                            task_state = bool(tok.meta.get("checked"))
+
+                        try:
+                            doc_style_names = {s.name for s in doc.styles}
+                        except MARKDOWN_PARSE_ERRORS:
+                            doc_style_names = set()
+
+                        if style in doc_style_names:
+                            use_style = style
+                        elif base_style in doc_style_names:
+                            use_style = base_style
+                        else:
+                            use_style = None
+
+                        if use_style:
+                            try:
+                                p = doc.add_paragraph(style=use_style)
+                            except MARKDOWN_PARSE_ERRORS:
+                                p = doc.add_paragraph()
+                        else:
+                            p = doc.add_paragraph()
+
+                        if task_state is not None:
+                            prefix = "[x] " if task_state else "[ ] "
+                            p.add_run(prefix)
+                            setattr(p, "_task_prefix_added", True)
+
+                        if i + 1 < len(tokens) and tokens[i + 1].type == 'paragraph_open':
+                            if i + 2 < len(tokens) and tokens[i + 2].type == 'inline':
+                                self._render_inline_tokens(p, tokens[i + 2])
+                            i += 4
+                        elif i + 1 < len(tokens) and tokens[i + 1].type == 'inline':
+                            self._render_inline_tokens(p, tokens[i + 1])
+                            i += 2
+                        else:
+                            i += 1
+                        continue
+
+                    if tok.type in ('ordered_list_close', 'bullet_list_close'):
+                        if list_stack:
+                            list_stack.pop()
+                        i += 1
+                        continue
+
+                    if tok.type in ('fence', 'code_block'):
+                        p = doc.add_paragraph()
+                        self._render_code_block(p, tok.content or '')
+                        i += 1
+                        continue
+
+                    if tok.type == 'table_open':
+                        table_data = self._parse_table_tokens(tokens, i)
+                        if table_data:
+                            self._render_table(doc, table_data)
+                            i = table_data['end_index']
+                        else:
+                            i += 1
+                        continue
+
+                    i += 1
+
                 buffer = io.BytesIO()
                 doc.save(buffer)
                 return buffer.getvalue()
@@ -785,48 +888,233 @@ class StorageService:
                 error_type=type(e).__name__,
             )
             raise
-    
-    def _add_formatted_text(self, paragraph, text: str):
-        """
-        Add text to a paragraph with markdown formatting support.
-        Handles **bold**, *italic*, and normal text.
-        
-        Args:
-            paragraph: python-docx paragraph object
-            text: Text potentially containing markdown formatting
-        """
-        import re
-        
-        # Pattern matches: **bold** (must have 2 asterisks) or *italic* (must have 1 asterisk, not 2)
-        # This regex uses non-greedy matching and looks ahead to prevent false matches
-        pattern = r'(\*\*(.+?)\*\*|\*(.+?)\*(?!\*))'
-        
-        last_end = 0
-        for match in re.finditer(pattern, text):
-            # Add any normal text before this match
-            if match.start() > last_end:
-                normal_text = text[last_end:match.start()]
-                paragraph.add_run(normal_text)
-            
-            # Add the formatted text
-            if match.group(1).startswith('**'):
-                # Bold text
-                bold_text = match.group(2)
-                run = paragraph.add_run(bold_text)
-                run.bold = True
-            else:
-                # Italic text
-                italic_text = match.group(3)
-                run = paragraph.add_run(italic_text)
-                run.italic = True
-            
-            last_end = match.end()
-        
-        # Add any remaining text after the last match
-        if last_end < len(text):
-            remaining_text = text[last_end:]
-            paragraph.add_run(remaining_text)
 
+    def _collect_plain_text(self, inline_token) -> str:
+        """Collect plain text from an inline token."""
+        text_parts = []
+        for child in getattr(inline_token, 'children', []) or []:
+            if child.type in ('text', 'code_inline'):
+                text_parts.append(child.content)
+            elif child.type in ('softbreak', 'hardbreak'):
+                text_parts.append('\n')
+            elif child.type == 'link_open':
+                continue
+        return ''.join(text_parts)
+
+    def _render_inline_tokens(self, paragraph, inline_token) -> None:
+        """Render inline markdown tokens into a python-docx paragraph."""
+        from docx.shared import Pt, RGBColor
+
+        children = getattr(inline_token, 'children', []) or []
+        i = 0
+        while i < len(children):
+            child = children[i]
+
+            if child.type == 'text':
+                paragraph.add_run(child.content)
+                i += 1
+            elif child.type == 'code_inline':
+                run = paragraph.add_run(child.content)
+                run.font.name = 'Consolas'
+                run.font.size = Pt(10)
+                run.font.color.rgb = RGBColor(0, 0, 0)
+                i += 1
+            elif child.type == 'strong_open':
+                text, tokens_consumed = self._gather_text_between_with_count(children, i, 'strong_close')
+                run = paragraph.add_run(text)
+                run.bold = True
+                i += tokens_consumed
+            elif child.type == 'em_open':
+                text, tokens_consumed = self._gather_text_between_with_count(children, i, 'em_close')
+                run = paragraph.add_run(text)
+                run.italic = True
+                i += tokens_consumed
+            elif child.type in ('softbreak', 'hardbreak'):
+                paragraph.add_run('\n')
+                i += 1
+            elif child.type == 'link_open':
+                text, tokens_consumed = self._gather_text_between_with_count(children, i, 'link_close')
+                href = self._get_token_attr(child, "href")
+                if href:
+                    self._add_hyperlink(paragraph, href, text or href)
+                else:
+                    paragraph.add_run(text)
+                i += tokens_consumed
+            elif child.type == 's_open':
+                text, tokens_consumed = self._gather_text_between_with_count(children, i, 's_close')
+                run = paragraph.add_run(text)
+                run.font.strike = True
+                i += tokens_consumed
+            elif child.type == 'task_list_item_checkbox':
+                checked = False
+                if isinstance(getattr(child, "meta", None), dict):
+                    checked = bool(child.meta.get("checked"))
+                if not getattr(paragraph, "_task_prefix_added", False):
+                    prefix = "[x] " if checked else "[ ] "
+                    paragraph.add_run(prefix)
+                    setattr(paragraph, "_task_prefix_added", True)
+                i += 1
+            else:
+                i += 1
+
+    def _get_token_attr(self, token, attr_name: str) -> Optional[str]:
+        """Return a token attribute value if present."""
+        if hasattr(token, "attrGet"):
+            try:
+                value = token.attrGet(attr_name)
+                if value:
+                    return value
+            except MARKDOWN_PARSE_ERRORS:
+                pass
+
+        attrs = getattr(token, "attrs", None) or []
+        for key, value in attrs:
+            if key == attr_name:
+                return value
+        return None
+
+    def _add_hyperlink(self, paragraph, url: str, text: str) -> None:
+        """Add a hyperlink to a paragraph."""
+        from docx.oxml import OxmlElement
+        from docx.oxml.ns import qn
+        from docx.opc.constants import RELATIONSHIP_TYPE as RT
+
+        part = paragraph.part
+        r_id = part.relate_to(url, RT.HYPERLINK, is_external=True)
+
+        hyperlink = OxmlElement("w:hyperlink")
+        hyperlink.set(qn("r:id"), r_id)
+
+        new_run = OxmlElement("w:r")
+        r_pr = OxmlElement("w:rPr")
+        new_run.append(r_pr)
+
+        new_text = OxmlElement("w:t")
+        new_text.text = text
+        new_run.append(new_text)
+
+        hyperlink.append(new_run)
+        paragraph._p.append(hyperlink)
+
+    def _gather_text_between_with_count(self, children: list, start_index: int, end_type: str) -> tuple[str, int]:
+        """Gather plain text between matching inline token delimiters."""
+        text_parts = []
+        open_count = 1
+        start_token_type = children[start_index].type
+        tokens_consumed = 1
+
+        for i in range(start_index + 1, len(children)):
+            token = children[i]
+            tokens_consumed += 1
+
+            if token.type == start_token_type:
+                open_count += 1
+            elif token.type == end_type:
+                open_count -= 1
+                if open_count == 0:
+                    break
+            elif token.type in ('text', 'code_inline'):
+                text_parts.append(token.content)
+
+        return ''.join(text_parts), tokens_consumed
+
+    def _render_code_block(self, paragraph, content: str) -> None:
+        """Render fenced/code block content in monospace formatting."""
+        from docx.shared import Pt
+
+        run = paragraph.add_run(content)
+        run.font.name = 'Consolas'
+        run.font.size = Pt(10)
+
+    def _parse_table_tokens(self, tokens: list, start_index: int) -> Optional[dict]:
+        """Parse markdown-it table tokens into rows for python-docx."""
+        rows = []
+        current_row = []
+        in_header = True
+        i = start_index
+
+        while i < len(tokens):
+            tok = tokens[i]
+
+            if tok.type == 'table_open':
+                i += 1
+                continue
+
+            if tok.type == 'thead_open':
+                in_header = True
+                i += 1
+                continue
+
+            if tok.type == 'tbody_open':
+                in_header = False
+                i += 1
+                continue
+
+            if tok.type == 'tr_open':
+                current_row = []
+                i += 1
+                continue
+
+            if tok.type in ('th_open', 'td_open'):
+                cell_content = ''
+                if i + 1 < len(tokens) and tokens[i + 1].type == 'inline':
+                    cell_content = self._collect_plain_text(tokens[i + 1])
+                current_row.append(cell_content)
+                i += 3
+                continue
+
+            if tok.type == 'tr_close':
+                if current_row:
+                    rows.append({
+                        'cells': current_row,
+                        'is_header': in_header,
+                    })
+                i += 1
+                continue
+
+            if tok.type in ('thead_close', 'tbody_close'):
+                i += 1
+                continue
+
+            if tok.type == 'table_close':
+                return {
+                    'rows': rows,
+                    'end_index': i + 1,
+                }
+
+            i += 1
+
+        return None
+
+    def _render_table(self, doc, table_data: dict) -> None:
+        """Render a table in the Word document."""
+        from docx.shared import Inches
+
+        rows = table_data['rows']
+        if not rows:
+            return
+
+        num_rows = len(rows)
+        num_cols = max(len(row['cells']) for row in rows) if rows else 0
+        if num_rows == 0 or num_cols == 0:
+            return
+
+        table = doc.add_table(rows=num_rows, cols=num_cols)
+        table.style = 'Table Grid'
+
+        for col in table.columns:
+            col.width = Inches(1.0)
+
+        for row_idx, row_data in enumerate(rows):
+            for col_idx, cell_content in enumerate(row_data['cells']):
+                if col_idx < num_cols:
+                    cell = table.cell(row_idx, col_idx)
+                    cell.text = cell_content
+
+                    if row_data['is_header']:
+                        for paragraph in cell.paragraphs:
+                            for run in paragraph.runs:
+                                run.bold = True
     async def stream_blob_content(
         self, file_blob_url: str
     ) -> AsyncGenerator[bytes, None]:

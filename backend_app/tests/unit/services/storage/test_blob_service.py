@@ -1,6 +1,7 @@
 import pytest
 import pytest_asyncio
 import asyncio
+import io
 import os
 from unittest.mock import MagicMock, AsyncMock, patch, PropertyMock
 from datetime import datetime, timedelta, timezone
@@ -271,6 +272,39 @@ class TestUpload:
             mock_blob.upload_blob.assert_called()
             mock_doc.save.assert_called()
 
+    async def test_generate_docx_bytes_renders_markdown_tables(self, storage_service):
+        from docx import Document
+
+        docx_content = await storage_service.generate_docx_bytes(
+            (
+                "# Actions\n"
+                "Intro paragraph with **bold**, *italic*, and `code`.\n\n"
+                "1. First item\n"
+                "2. Second item with **strong**\n\n"
+                "- Bullet A\n\n"
+                "| Item | Owner | Status |\n"
+                "| --- | --- | --- |\n"
+                "| Follow up | Lisa | **Done** |\n"
+                "| Review | Alex | Pending |"
+            ),
+            add_title=False,
+        )
+
+        document = Document(io.BytesIO(docx_content))
+
+        styles = [paragraph.style.name for paragraph in document.paragraphs]
+        assert any(style.startswith("Heading") for style in styles)
+        assert any(style.startswith("List Number") for style in styles)
+        assert any(style.startswith("List Bullet") for style in styles)
+        assert any(run.bold for paragraph in document.paragraphs for run in paragraph.runs)
+        assert any(run.italic for paragraph in document.paragraphs for run in paragraph.runs)
+        assert any(run.font.name == "Consolas" for paragraph in document.paragraphs for run in paragraph.runs)
+        assert len(document.tables) == 1
+        table = document.tables[0]
+        assert [cell.text for cell in table.rows[0].cells] == ["Item", "Owner", "Status"]
+        assert [cell.text for cell in table.rows[1].cells] == ["Follow up", "Lisa", "Done"]
+        assert table.cell(0, 0).paragraphs[0].runs[0].bold is True
+
     async def test_generate_and_upload_docx_error(self, storage_service):
         with patch("docx.Document", side_effect=Exception("Error")):
             with pytest.raises(Exception):
@@ -440,20 +474,3 @@ class TestSetBlobMetadata:
         # Verify the last call had the updated metadata
         last_call = mock_blob.set_blob_metadata.call_args_list[-1]
         assert last_call[0][0] == updated_metadata
-
-@pytest.mark.asyncio
-class TestFormatting:
-    def test_add_formatted_text(self, storage_service):
-        # This is a helper method, but we can test it via generate_and_upload_docx or directly if we access it
-        # It's a method on the class
-        mock_paragraph = MagicMock()
-        
-        storage_service._add_formatted_text(mock_paragraph, "Normal **Bold** *Italic*")
-        
-        # Verify calls
-        # Should add "Normal "
-        # Should add "Bold" with bold=True
-        # Should add " "
-        # Should add "Italic" with italic=True
-        
-        assert mock_paragraph.add_run.call_count >= 3

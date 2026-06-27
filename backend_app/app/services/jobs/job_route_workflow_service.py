@@ -17,6 +17,7 @@ _jobs_cache = TTLCache[Dict[str, Any]](default_ttl=600.0)
 
 DOCX_MEDIA_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 PDF_MEDIA_TYPE = "application/pdf"
+MAX_ANALYSIS_MARKDOWN_CHARS = 500_000
 
 
 async def invalidate_job_list_cache() -> None:
@@ -213,6 +214,60 @@ class JobRouteWorkflowService:
             raise ResourceNotReadyError(str(exc), {"job_id": job_id}) from exc
 
         return {"status": 200, "transcription": updated_text}
+
+    async def update_analysis_document(
+        self,
+        *,
+        job_id: str,
+        markdown_content: str,
+        analysis_file_path: Optional[str],
+        current_user: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if len(markdown_content) > MAX_ANALYSIS_MARKDOWN_CHARS:
+            raise ValidationError("Analysis document is too large")
+
+        job_service = self._job_service()
+        storage_service = self._storage_service()
+        job = await job_service.get_job(job_id)
+        if not job:
+            raise ResourceNotFoundError("Job", job_id)
+        if not check_job_access(job, current_user, "edit"):
+            raise PermissionError("Access denied to job")
+
+        source_path = _resolve_analysis_path(job, analysis_file_path)
+        if not source_path:
+            raise ResourceNotReadyError(
+                "Analysis document not available",
+                {"job_id": job_id},
+            )
+        if _path_extension(source_path) != ".md":
+            raise ValidationError(
+                "Analysis document edits are only available for Markdown files"
+            )
+
+        storage_path = _strip_url_query(source_path)
+        if job.get("analysis_file_path"):
+            job["analysis_file_path"] = _strip_url_query(job["analysis_file_path"])
+        attempts = job.get("analysis_attempts")
+        if isinstance(attempts, list):
+            for attempt in attempts:
+                if isinstance(attempt, dict) and attempt.get("analysis_file_path"):
+                    attempt["analysis_file_path"] = _strip_url_query(
+                        attempt["analysis_file_path"]
+                    )
+
+        await storage_service.upload_text_to_blob(
+            storage_path,
+            markdown_content,
+            content_type="text/markdown; charset=utf-8",
+        )
+        updated_job = await job_service.update_analysis_text(job, markdown_content)
+        return {
+            "status": "success",
+            "message": "Analysis document updated",
+            "document_url": storage_path,
+            "updated_at": updated_job.get("updated_at"),
+        }
 
     async def soft_delete_job(
         self,

@@ -11,7 +11,11 @@ from ....deps import (
     get_job_upload_service,
     get_storage_service,
 )
-from ....schemas.jobs import JobUpdateRequest, SpeakerNamesUpdateRequest
+from ....schemas.jobs import (
+    AnalysisDocumentUpdateRequest,
+    JobUpdateRequest,
+    SpeakerNamesUpdateRequest,
+)
 from ....services.jobs.job_service import JobService
 from ....services.jobs.job_permissions import JobPermissions
 from ....services.jobs.job_management_service import JobManagementService
@@ -81,6 +85,49 @@ async def get_job_transcription(
         yield text.encode("utf-8")
 
     return StreamingResponse(stream_text(), media_type="text/plain")
+
+
+@router.get("/jobs/{job_id}/analysis-document")
+async def get_job_analysis_document(
+    job_id: str,
+    analysis_file_path: Optional[str] = Query(None),
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    job_svc: JobService = Depends(get_job_service),
+    storage_service: StorageServiceInterface = Depends(get_storage_service),
+):
+    document = await JobRouteWorkflowService(
+        job_service=job_svc,
+        storage_service=storage_service,
+    ).get_analysis_document(
+        job_id=job_id,
+        current_user=current_user,
+        analysis_file_path=analysis_file_path,
+    )
+    filename = document["filename"].replace('"', "")
+    return StreamingResponse(
+        iter([document["content"]]),
+        media_type=document["media_type"],
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.put("/jobs/{job_id}/analysis-document")
+async def update_job_analysis_document(
+    job_id: str,
+    update_request: AnalysisDocumentUpdateRequest,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    job_svc: JobService = Depends(get_job_service),
+    storage_service: StorageServiceInterface = Depends(get_storage_service),
+):
+    return await JobRouteWorkflowService(
+        job_service=job_svc,
+        storage_service=storage_service,
+    ).update_analysis_document(
+        job_id=job_id,
+        markdown_content=update_request.markdown_content,
+        analysis_file_path=update_request.analysis_file_path,
+        current_user=current_user,
+    )
 
 
 @router.patch("/jobs/{job_id}/transcription/speakers")

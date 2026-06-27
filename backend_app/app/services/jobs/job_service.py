@@ -86,6 +86,17 @@ class JobService:
         await invalidate_job_cache(job["id"])
         return updated_text
 
+    async def update_analysis_text(
+        self,
+        job: Dict[str, Any],
+        analysis_text: str,
+    ) -> Dict[str, Any]:
+        job["analysis_text"] = analysis_text
+        job["updated_at"] = datetime.now(UTC).isoformat()
+        updated_job = await self.repository.replace(job["id"], job)
+        await invalidate_job_cache(job["id"])
+        return updated_job
+
     async def get_jobs_with_filters(
         self,
         *,

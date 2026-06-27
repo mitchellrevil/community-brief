@@ -559,7 +559,13 @@ class InMemoryBlobFake:
             except UnicodeDecodeError:
                 return None
 
-    async def upload_text_to_blob(self, blob_url: str, text_content: str) -> str:
+    async def upload_text_to_blob(
+        self,
+        blob_url: str,
+        text_content: str,
+        *,
+        content_type: str = "text/plain; charset=utf-8",
+    ) -> str:
         """Overwrite text content at an existing blob URL."""
         blob_name = self._extract_blob_name(blob_url)
         if not blob_name:
