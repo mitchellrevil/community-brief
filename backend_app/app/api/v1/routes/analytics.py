@@ -180,7 +180,11 @@ async def export_users(
     current_user: dict[str, Any] = Depends(require_editor),
     export_workflow: AnalyticsExportWorkflowService = Depends(get_analytics_export_workflow_service),
 ) -> StreamingResponse:
-    return export_workflow.export_users(format=format, export_request=export_request)
+    return export_workflow.export_users(
+        format=format,
+        export_request=export_request,
+        current_user=current_user,
+    )
 
 
 @router.get("/export/users/{user_id}/pdf", tags=["analytics.export"])
@@ -195,4 +199,5 @@ async def export_user_pdf(
         user_id=user_id,
         include_analytics=include_analytics,
         days=days,
+        current_user=current_user,
     )

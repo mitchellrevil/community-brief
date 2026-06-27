@@ -3,6 +3,7 @@ import os
 from unittest.mock import AsyncMock, MagicMock
 import pytest
 
+from backend_app.app.core.errors.domain import ErrorCode
 from backend_app.app.repositories.analytics import (
     AnalyticsPromptExportRepository,
     AnalyticsPromptRepository,
@@ -207,6 +208,44 @@ async def test_cleanup_and_pdf_analytics_failure(tmp_path):
         os.unlink(r['file_path'])
     except Exception:
         pass
+
+
+@pytest.mark.asyncio
+async def test_stream_users_csv_filters_by_business_unit_scope():
+    cosmos = MagicMock()
+    analytics = MagicMock()
+    user_repository = MagicMock()
+    svc = build_export_service(cosmos, analytics, user_repository=user_repository)
+
+    async def users_iter():
+        yield {"id": "u1", "email": "a@b.com", "business_unit_ids": ["bu-1"]}
+        yield {"id": "u2", "email": "b@c.com", "business_unit_ids": ["bu-2"]}
+
+    user_repository.iter_all = users_iter
+
+    chunks = []
+    async for piece in svc.stream_users_csv(business_unit_ids=["bu-1"]):
+        chunks.append(piece)
+
+    csv_output = "".join(chunks)
+    assert "u1" in csv_output
+    assert "u2" not in csv_output
+
+
+@pytest.mark.asyncio
+async def test_export_user_details_pdf_rejects_out_of_scope_user():
+    cosmos = MagicMock()
+    analytics = MagicMock()
+    user_repository = MagicMock()
+    svc = build_export_service(cosmos, analytics, user_repository=user_repository)
+
+    user_repository.get_by_id = AsyncMock(return_value={"id": "u2", "business_unit_ids": ["bu-2"]})
+
+    result = await svc.export_user_details_pdf("u2", business_unit_ids=["bu-1"])
+
+    assert result["status"] == "error"
+    assert result["status_code"] == 403
+    assert result["error_code"] == ErrorCode.FORBIDDEN
 
 
 def test_check_user_matches_filters_small():

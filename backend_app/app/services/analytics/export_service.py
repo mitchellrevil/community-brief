@@ -13,6 +13,7 @@ from reportlab.lib import colors
 from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from azure.cosmos.exceptions import CosmosHttpResponseError
 
+from ...core.errors.domain import ErrorCode
 from ...core.logging import get_logger
 from ...repositories.analytics import (
     AnalyticsPromptExportRepository,
@@ -138,7 +139,11 @@ class ExportService:
                 'message': str(e)
             }
 
-    async def stream_users_csv(self, filters: Optional[Dict[str, Any]] = None) -> AsyncIterator[str]:
+    async def stream_users_csv(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        business_unit_ids: Optional[List[str]] = None,
+    ) -> AsyncIterator[str]:
         """
         Stream all users as CSV data
         
@@ -164,6 +169,8 @@ class ExportService:
         
         # Stream users
         async for user in self.user_repository.iter_all():
+            if not self._user_in_business_units(user, business_unit_ids):
+                continue
             # Apply filters
             if filters and not self._check_user_matches_filters(user, filters):
                 continue
@@ -186,6 +193,24 @@ class ExportService:
             yield output.getvalue()
             output.seek(0)
             output.truncate(0)
+
+    def _user_in_business_units(
+        self,
+        user: Dict[str, Any],
+        business_unit_ids: Optional[List[str]],
+    ) -> bool:
+        if not business_unit_ids:
+            return True
+
+        user_business_unit_ids = {
+            business_unit_id
+            for business_unit_id in (user.get("business_unit_ids") or [])
+            if business_unit_id
+        }
+        if user.get("business_unit_id"):
+            user_business_unit_ids.add(user["business_unit_id"])
+
+        return bool(user_business_unit_ids.intersection(business_unit_ids))
 
     def _check_user_matches_filters(self, user: Dict[str, Any], filters: Dict[str, Any]) -> bool:
         """Check if user matches the provided filters"""
@@ -301,7 +326,13 @@ class ExportService:
                 error_type=type(e).__name__,
             )
 
-    async def export_user_details_pdf(self, user_id: str, include_analytics: bool = True, days: int = 30) -> Dict[str, Any]:
+    async def export_user_details_pdf(
+        self,
+        user_id: str,
+        include_analytics: bool = True,
+        days: int = 30,
+        business_unit_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
         """Create a PDF describing a user's details and optional analytics summary.
 
         Returns a dict with keys: status, file_path, filename, content_type or status:error + message
@@ -309,7 +340,19 @@ class ExportService:
         try:
             user = await self.user_repository.get_by_id(user_id)
             if not user:
-                return {'status': 'error', 'message': 'User not found'}
+                return {
+                    'status': 'error',
+                    'message': 'User not found',
+                    'status_code': 404,
+                    'error_code': ErrorCode.RESOURCE_NOT_FOUND,
+                }
+            if not self._user_in_business_units(user, business_unit_ids):
+                return {
+                    'status': 'error',
+                    'message': 'You do not have access to this user',
+                    'status_code': 403,
+                    'error_code': ErrorCode.FORBIDDEN,
+                }
 
             # Optional analytics
             analytics = None

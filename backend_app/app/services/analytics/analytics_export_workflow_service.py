@@ -85,6 +85,7 @@ class AnalyticsExportWorkflowService:
         *,
         format: str,
         export_request: Optional[dict],
+        current_user: dict[str, Any],
     ) -> StreamingResponse:
         if format not in ("csv", "pdf"):
             raise ValidationError(
@@ -101,11 +102,12 @@ class AnalyticsExportWorkflowService:
                 details={"format": format},
             )
 
+        business_unit_ids = _resolve_export_business_units(current_user, None)
         filters = export_request.get("filters") if export_request else None
         timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         filename = f"community-brief-users-{timestamp}.csv"
         return StreamingResponse(
-            self.export_service.stream_users_csv(filters),
+            self.export_service.stream_users_csv(filters, business_unit_ids=business_unit_ids),
             media_type="text/csv",
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
@@ -116,13 +118,20 @@ class AnalyticsExportWorkflowService:
         user_id: str,
         include_analytics: bool,
         days: int,
+        current_user: dict[str, Any],
     ) -> FileResponse:
-        result = await self.export_service.export_user_details_pdf(user_id, include_analytics, days)
+        business_unit_ids = _resolve_export_business_units(current_user, None)
+        result = await self.export_service.export_user_details_pdf(
+            user_id,
+            include_analytics,
+            days,
+            business_unit_ids=business_unit_ids,
+        )
         if result.get("status") == "error":
             raise ApplicationError(
                 result.get("message", "Export failed."),
-                ErrorCode.EXTERNAL_SERVICE_ERROR,
-                status_code=500,
+                result.get("error_code", ErrorCode.EXTERNAL_SERVICE_ERROR),
+                status_code=result.get("status_code", 500),
                 details={
                     "operation": "export_user_details_pdf",
                     "user_id": user_id,

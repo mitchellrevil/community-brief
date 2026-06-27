@@ -201,6 +201,7 @@ class ExportServiceInterface(ABC):
         user_id: str,
         include_analytics: bool = True,
         days: int = 30,
+        business_unit_ids: Optional[List[str]] = None,
     ) -> Dict[str, Any]:
         """Export a PDF with user details (and optional analytics)."""
         pass
@@ -220,7 +221,11 @@ class ExportServiceInterface(ABC):
         pass
 
     @abstractmethod
-    async def stream_users_csv(self, filters: Optional[Dict[str, Any]] = None):
+    async def stream_users_csv(
+        self,
+        filters: Optional[Dict[str, Any]] = None,
+        business_unit_ids: Optional[List[str]] = None,
+    ):
         """Stream users as CSV lines for the given filters."""
         pass
 

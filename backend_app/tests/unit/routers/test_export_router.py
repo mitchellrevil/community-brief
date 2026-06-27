@@ -49,11 +49,12 @@ async def test_export_system_prompts_delegates_to_workflow():
 async def test_export_users_delegates_to_workflow():
     workflow = MagicMock()
     workflow.export_users.return_value = "response"
+    current_user = {"permission": "Editor", "business_unit_ids": ["bu-1"]}
 
     result = await export_mod.export_users(
         "csv",
         export_request={"filters": {"permission": "Admin"}},
-        current_user={},
+        current_user=current_user,
         export_workflow=workflow,
     )
 
@@ -61,6 +62,7 @@ async def test_export_users_delegates_to_workflow():
     workflow.export_users.assert_called_once_with(
         format="csv",
         export_request={"filters": {"permission": "Admin"}},
+        current_user=current_user,
     )
 
 
@@ -68,12 +70,13 @@ async def test_export_users_delegates_to_workflow():
 async def test_export_user_pdf_delegates_to_workflow():
     workflow = AsyncMock()
     workflow.export_user_pdf.return_value = "response"
+    current_user = {"permission": "Editor", "business_unit_ids": ["bu-1"]}
 
     result = await export_mod.export_user_pdf(
         user_id="u1",
         include_analytics=True,
         days=7,
-        current_user={},
+        current_user=current_user,
         export_workflow=workflow,
     )
 
@@ -82,4 +85,5 @@ async def test_export_user_pdf_delegates_to_workflow():
         user_id="u1",
         include_analytics=True,
         days=7,
+        current_user=current_user,
     )
