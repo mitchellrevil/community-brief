@@ -1,7 +1,6 @@
 
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeRaw from 'rehype-raw';
 import { cn } from "@/lib/utils";
 
 interface MarkdownRendererProps {
@@ -14,7 +13,6 @@ export function MarkdownRenderer({ content, className }: MarkdownRendererProps) 
     <div className={cn("text-foreground max-w-none", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[rehypeRaw]}
         components={{
           a: ({ node, ...props }) => (
             <a 

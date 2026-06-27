@@ -1,4 +1,7 @@
 {
+  "globalHeaders": {
+    "Content-Security-Policy": "base-uri 'self'; object-src 'none'; script-src 'self'"
+  },
   "navigationFallback": {
     "rewrite": "/index.html",
     "exclude": ["/assets/*", "/images/*", "/favicon.ico", "/auth-redirect.html"]
