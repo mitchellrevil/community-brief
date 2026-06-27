@@ -9,9 +9,7 @@ import {
   Check,
   ChevronsUpDown,
   Copy,
-  Eye,
   Loader2,
-  Shield,
   User,
   UserMinus,
   Users,
@@ -75,12 +73,29 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 const permissionOptions = [
-  { value: "view", label: "View", description: "Can view transcriptions and analysis" },
-  { value: "edit", label: "Edit", description: "Can view and edit content" },
-  { value: "admin", label: "Admin", description: "Can manage sharing" },
+  { value: "view", label: "View" },
+  { value: "edit", label: "Edit" },
+  { value: "admin", label: "Admin" },
 ] as const;
 
 type PermissionLevel = (typeof permissionOptions)[number]["value"];
+
+function accessInitials(value: string) {
+  const name = value.split("@")[0].replace(/[^a-zA-Z0-9]+/g, " ").trim();
+  if (!name) return "?";
+
+  const words = name.split(/\s+/).filter(Boolean);
+  if (words.length > 1) {
+    return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  }
+
+  const capitals = name.match(/[A-Z]/g);
+  if (capitals && capitals.length > 1) {
+    return capitals.slice(0, 2).join("").toUpperCase();
+  }
+
+  return name.slice(0, 2).toUpperCase();
+}
 
 const jobShareSchema = z.object({
   shared_user_email: z.string().email("Please enter a valid email address"),
@@ -263,7 +278,7 @@ export function JobShareDialog({
             <Users className="h-5 w-5 text-primary" />
             Manage Access
           </DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="break-words pr-8">
             Manage who can open "{jobTitle}" and what they can do.
           </DialogDescription>
         </DialogHeader>
@@ -454,11 +469,11 @@ export function JobShareDialog({
             )}
 
             {!isBusy && !accessError && (
-              <div className="space-y-2">
+              <div className="divide-y rounded-md border">
                 {sharingInfo?.is_owner && (
-                  <div className="flex items-center gap-3 rounded-md border p-3">
-                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
-                      <Shield className="h-4 w-4 text-muted-foreground" />
+                  <div className="flex items-center gap-3 px-3 py-3">
+                    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">
+                      {accessInitials("You")}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm font-medium">You</p>
@@ -481,7 +496,7 @@ export function JobShareDialog({
                 ))}
 
                 {!sharingInfo?.is_owner && sharedWith.length === 0 && (
-                  <div className="rounded-md border p-6 text-center text-sm text-muted-foreground">
+                  <div className="p-6 text-center text-sm text-muted-foreground">
                     No shared users found.
                   </div>
                 )}
@@ -518,13 +533,12 @@ function AccessRow({
   const currentPermission = permissionOptions.some((option) => option.value === share.permission_level)
     ? (share.permission_level as PermissionLevel)
     : "view";
-  const Icon = currentPermission === "admin" ? Shield : Eye;
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border p-3 sm:flex-row sm:items-center">
+    <div className="flex flex-col gap-3 px-3 py-3 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted">
-          <Icon className="h-4 w-4 text-muted-foreground" />
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-muted text-sm font-semibold text-muted-foreground">
+          {accessInitials(share.user_email)}
         </div>
         <div className="min-w-0">
           <p className="truncate text-sm font-medium">{share.user_email}</p>
@@ -542,7 +556,7 @@ function AccessRow({
             disabled={isUpdating || isRemoving}
           >
             <SelectTrigger
-              className="w-32"
+              className="h-9 w-28"
               aria-label={`Permission for ${share.user_email}`}
             >
               <SelectValue />
@@ -550,10 +564,7 @@ function AccessRow({
             <SelectContent>
               {permissionOptions.map((option) => (
                 <SelectItem key={option.value} value={option.value}>
-                  <div className="flex flex-col items-start">
-                    <span>{option.label}</span>
-                    <span className="text-xs text-muted-foreground">{option.description}</span>
-                  </div>
+                  {option.label}
                 </SelectItem>
               ))}
             </SelectContent>

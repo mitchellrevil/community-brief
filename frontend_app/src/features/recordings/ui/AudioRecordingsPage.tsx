@@ -1,25 +1,28 @@
+import type { QueuedRecording } from "@/lib/pwa-queue";
+import type { AudioListValues } from "@/shared/schema/audio-list.schema";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  TUTORIAL_SAMPLE_JOB,
+  useTutorialOptional,
+} from "@/app/contexts/tutorial-context";
+import { MiniAudioPlayer } from "@/components/audio-player/MiniAudioPlayer";
+import { Button } from "@/components/ui/button";
+import { FormatWarningDialog } from "@/components/ui/format-warning-dialog";
+import { PageHeading } from "@/components/ui/page-heading";
+import { EnhancedPagination } from "@/components/ui/pagination";
+import { SmartBreadcrumb } from "@/components/ui/smart-breadcrumb";
+import { getAudioRecordingsQuery } from "@/features/recordings/data/queries";
+import { JobDeleteDialog } from "@/features/recordings/ui/JobDeleteDialog";
+import { JobShareDialog } from "@/features/recordings/ui/JobShareDialog";
+import { getDisplayName } from "@/lib/display-name-utils";
+import { isAudioFile, isWellSupportedAudioFormat } from "@/lib/file-utils";
+import { getPendingRecordings } from "@/lib/pwa-queue";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useRouter } from "@tanstack/react-router";
 import { FileAudio, Plus } from "lucide-react";
+
 import { AudioRecordingsFilters } from "./AudioRecordingsFilters";
 import { AudioRecordingsList } from "./AudioRecordingsList";
-import type { QueuedRecording } from "@/lib/pwa-queue";
-import type { AudioListValues } from "@/shared/schema/audio-list.schema";
-import { isAudioFile, isWellSupportedAudioFormat } from "@/lib/file-utils";
-import { getDisplayName } from "@/lib/display-name-utils";
-import { JobShareDialog } from "@/features/recordings/ui/JobShareDialog";
-import { JobDeleteDialog } from "@/features/recordings/ui/JobDeleteDialog";
-import { MiniAudioPlayer } from "@/components/audio-player/MiniAudioPlayer";
-import { FormatWarningDialog } from "@/components/ui/format-warning-dialog";
-import { getAudioRecordingsQuery } from "@/features/recordings/data/queries";
-import { EnhancedPagination } from "@/components/ui/pagination";
-import { getPendingRecordings } from "@/lib/pwa-queue";
-import { Button } from "@/components/ui/button";
-import { SmartBreadcrumb } from "@/components/ui/smart-breadcrumb";
-import { PageHeading } from "@/components/ui/page-heading";
-
-import { TUTORIAL_SAMPLE_JOB, useTutorialOptional } from "@/app/contexts/tutorial-context";
 
 export function AudioRecordingsPage({
   initialFilters,
@@ -29,17 +32,17 @@ export function AudioRecordingsPage({
   const RECORDS_PER_PAGE = initialFilters.per_page || 12;
   const [currentPage, setCurrentPage] = useState(initialFilters.page || 1);
   const [viewMode, setViewMode] = useState<"card" | "table">("card");
-  
+
   // Tutorial mode handling
   const tutorialContext = useTutorialOptional();
   const isTutorialMode = tutorialContext?.isTutorialMode ?? false;
-  
+
   // Filter states
   const [search, setSearch] = useState(initialFilters.search || "");
-  const [status, setStatus] = useState<"all" | "uploaded" | "processing" | "completed" | "failed">(
-    (initialFilters.status as any) || "all"
-  );
-  
+  const [status, setStatus] = useState<
+    "all" | "uploaded" | "processing" | "completed" | "failed"
+  >((initialFilters.status as any) || "all");
+
   // Dialog states
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareRecording, setShareRecording] = useState<any>(null);
@@ -50,15 +53,17 @@ export function AudioRecordingsPage({
   const [pendingAudioPlay, setPendingAudioPlay] = useState<string | null>(null);
   // new date range filter state
   const [createdAtStart, setCreatedAtStart] = useState<string | undefined>(
-    (initialFilters as any).created_at_start || undefined
+    (initialFilters as any).created_at_start || undefined,
   );
   const [createdAtEnd, setCreatedAtEnd] = useState<string | undefined>(
-    (initialFilters as any).created_at_end || undefined
+    (initialFilters as any).created_at_end || undefined,
   );
-  
+
   // Data states
-  const [queuedRecordings, setQueuedRecordings] = useState<Array<QueuedRecording>>([]);
-  
+  const [queuedRecordings, setQueuedRecordings] = useState<
+    Array<QueuedRecording>
+  >([]);
+
   const router = useRouter();
 
   // Load queued recordings
@@ -68,7 +73,7 @@ export function AudioRecordingsPage({
         const pending = await getPendingRecordings();
         setQueuedRecordings(pending);
       } catch (error) {
-        console.error('Failed to load queued recordings:', error);
+        console.error("Failed to load queued recordings:", error);
       }
     };
 
@@ -100,14 +105,24 @@ export function AudioRecordingsPage({
     return () => clearTimeout(timer);
   }, [search, status, createdAtStart, createdAtEnd]);
 
-  const queryFilters = useMemo(() => ({
-    search: search || undefined,
-    status: status === "all" ? undefined : status,
-    created_at_start: createdAtStart || undefined,
-    created_at_end: createdAtEnd || undefined,
-    page: currentPage,
-    per_page: RECORDS_PER_PAGE
-  }), [search, status, createdAtStart, createdAtEnd, currentPage, RECORDS_PER_PAGE]);
+  const queryFilters = useMemo(
+    () => ({
+      search: search || undefined,
+      status: status === "all" ? undefined : status,
+      created_at_start: createdAtStart || undefined,
+      created_at_end: createdAtEnd || undefined,
+      page: currentPage,
+      per_page: RECORDS_PER_PAGE,
+    }),
+    [
+      search,
+      status,
+      createdAtStart,
+      createdAtEnd,
+      currentPage,
+      RECORDS_PER_PAGE,
+    ],
+  );
 
   const {
     data: audioRecordingsResponse,
@@ -119,21 +134,21 @@ export function AudioRecordingsPage({
   // Refresh on mount and window focus
   useEffect(() => {
     refetchJobs();
-    
+
     const handleFocus = () => {
       refetchJobs();
     };
-    
-    window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState === 'visible') {
+
+    window.addEventListener("focus", handleFocus);
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
         refetchJobs();
       }
     });
-    
+
     return () => {
-      window.removeEventListener('focus', handleFocus);
-      document.removeEventListener('visibilitychange', handleFocus);
+      window.removeEventListener("focus", handleFocus);
+      document.removeEventListener("visibilitychange", handleFocus);
     };
   }, [refetchJobs]);
 
@@ -145,7 +160,7 @@ export function AudioRecordingsPage({
     const scheduleNextRefresh = () => {
       const elapsed = Date.now() - startTime;
       const TEN_MINUTES = 10 * 60 * 1000;
-      
+
       if (elapsed < TEN_MINUTES) {
         // First 10 minutes: refresh every minute
         refreshInterval = setTimeout(() => {
@@ -173,22 +188,26 @@ export function AudioRecordingsPage({
   const totalPages = Math.max(1, Math.ceil(totalCount / RECORDS_PER_PAGE));
 
   // Combine queued recordings
-  const displayQueuedRecordings = queuedRecordings.map(qr => ({
+  const displayQueuedRecordings = queuedRecordings.map((qr) => ({
     id: qr.id,
     displayname: qr.metadata.categoryName,
     file_name: qr.metadata.categoryName,
     filename: qr.metadata.categoryName,
-    file_path: '',
-    status: 'queued' as const,
+    file_path: "",
+    status: "queued" as const,
     created_at: new Date(qr.createdAt).getTime(),
-    user_id: '',
+    user_id: "",
     _isQueued: true,
     _queuedRecording: qr,
   }));
 
   // During tutorial mode, show the sample job at the top of the list
   const tutorialSampleRecordings = isTutorialMode ? [TUTORIAL_SAMPLE_JOB] : [];
-  const allRecordings = [...tutorialSampleRecordings, ...displayQueuedRecordings, ...audioRecordings];
+  const allRecordings = [
+    ...tutorialSampleRecordings,
+    ...displayQueuedRecordings,
+    ...audioRecordings,
+  ];
 
   const handlePageChange = (newPage: number) => {
     setCurrentPage(newPage);
@@ -197,13 +216,20 @@ export function AudioRecordingsPage({
       search: (prev) => ({ ...prev, page: newPage }),
       replace: true,
     });
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleViewDetails = useCallback((recording: any) => {
-    localStorage.setItem("current_recording_id", recording.id);
-    router.navigate({ to: "/audio-recordings/$id", params: { id: recording.id } });
-  }, [router]);
+  const handleViewDetails = useCallback(
+    (recording: any) => {
+      localStorage.setItem("current_recording_id", recording.id);
+      router.navigate({
+        to: "/audio-recordings/$id",
+        params: { id: recording.id },
+        search: { from: "files" },
+      });
+    },
+    [router],
+  );
 
   const handlePlayAudio = useCallback((recording: any) => {
     if (isAudioFile(recording.file_path)) {
@@ -238,22 +264,24 @@ export function AudioRecordingsPage({
   }, []);
 
   return (
-    <div className="w-full max-w-full min-h-screen overflow-x-hidden">
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden">
       <PageHeading
         icon={<FileAudio className="h-5 w-5 sm:h-6 sm:w-6" />}
         title="My Files"
-        breadcrumb={<SmartBreadcrumb items={[{ label: "Files", isCurrentPage: true }]} />}
-        actions={(
-          <Link to="/audio-upload" className="hidden sm:block flex-shrink-0">
+        breadcrumb={
+          <SmartBreadcrumb items={[{ label: "Files", isCurrentPage: true }]} />
+        }
+        actions={
+          <Link to="/audio-upload" className="hidden flex-shrink-0 sm:block">
             <Button className="h-10">
               <Plus className="mr-2 h-4 w-4" />
               New Recording
             </Button>
           </Link>
-        )}
+        }
       />
 
-      <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6 pb-24 md:pb-6">
+      <div className="mx-auto w-full max-w-7xl space-y-4 px-4 py-4 pb-24 sm:space-y-6 sm:px-6 sm:py-6 md:pb-6">
         <AudioRecordingsFilters
           createdAtStart={createdAtStart}
           createdAtEnd={createdAtEnd}
@@ -292,41 +320,41 @@ export function AudioRecordingsPage({
           onPageChange={handlePageChange}
         />
 
-      {shareRecording && (
-        <JobShareDialog
-          isOpen={shareDialogOpen}
-          onOpenChange={setShareDialogOpen}
-          jobId={shareRecording.id}
-          jobTitle={getDisplayName(shareRecording)}
-        />
-      )}
+        {shareRecording && (
+          <JobShareDialog
+            isOpen={shareDialogOpen}
+            onOpenChange={setShareDialogOpen}
+            jobId={shareRecording.id}
+            jobTitle={getDisplayName(shareRecording)}
+          />
+        )}
 
-      {deleteRecording && (
-        <JobDeleteDialog
-          isOpen={deleteDialogOpen}
-          onOpenChange={setDeleteDialogOpen}
-          jobId={deleteRecording.id}
-          jobTitle={getDisplayName(deleteRecording)}
-          onDeleteSuccess={refetchJobs}
-        />
-      )}
+        {deleteRecording && (
+          <JobDeleteDialog
+            isOpen={deleteDialogOpen}
+            onOpenChange={setDeleteDialogOpen}
+            jobId={deleteRecording.id}
+            jobTitle={getDisplayName(deleteRecording)}
+            onDeleteSuccess={refetchJobs}
+          />
+        )}
 
-      {pendingAudioPlay && (
-        <FormatWarningDialog
-          isOpen={formatWarningOpen}
-          onOpenChange={setFormatWarningOpen}
-          filePath={pendingAudioPlay}
-          onContinue={() => setPlayingAudio(pendingAudioPlay)}
-        />
-      )}
+        {pendingAudioPlay && (
+          <FormatWarningDialog
+            isOpen={formatWarningOpen}
+            onOpenChange={setFormatWarningOpen}
+            filePath={pendingAudioPlay}
+            onContinue={() => setPlayingAudio(pendingAudioPlay)}
+          />
+        )}
 
-      {playingAudio && (
-        <MiniAudioPlayer
-          src={playingAudio}
-          onClose={() => setPlayingAudio(null)}
-        />
-      )}
+        {playingAudio && (
+          <MiniAudioPlayer
+            src={playingAudio}
+            onClose={() => setPlayingAudio(null)}
+          />
+        )}
+      </div>
     </div>
-  </div>
   );
 }

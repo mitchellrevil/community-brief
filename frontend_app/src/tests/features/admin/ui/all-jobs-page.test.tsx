@@ -357,6 +357,25 @@ describe("AdminAllJobsPage", () => {
       });
     });
 
+    it("should prefer job display name when present", async () => {
+      vi.mocked(audioRecordingsApi.fetchAllJobsApi).mockResolvedValueOnce({
+        ...mockJobsResponse,
+        jobs: [
+          {
+            ...mockJobs[0],
+            display_name: "Board Meeting",
+          },
+        ],
+        total_count: 1,
+      });
+
+      renderWithQueryClient(<AdminAllJobsPage />);
+
+      await waitFor(() => {
+        expect(screen.getByText("Board Meeting")).toBeInTheDocument();
+      });
+    });
+
     it("should display correct job information", async () => {
       renderWithQueryClient(<AdminAllJobsPage />);
 

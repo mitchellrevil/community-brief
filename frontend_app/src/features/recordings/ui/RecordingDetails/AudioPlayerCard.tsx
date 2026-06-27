@@ -1,34 +1,42 @@
-import React, { memo } from 'react';
-import { AlertCircle, Download, FileAudio, Loader2, Pause, Play, Volume2, VolumeX } from 'lucide-react';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
-import { useAudioPlayer } from '@/hooks/useAudioPlayer';
-import { fadeInUp } from '@/lib/motion';
-import { MotionDiv } from '@/components/ui/motion';
+import React, { memo } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { MotionDiv } from "@/components/ui/motion";
+import { Slider } from "@/components/ui/slider";
+import { useAudioPlayer } from "@/hooks/useAudioPlayer";
+import { formatDuration } from "@/lib/date-utils";
+import { fadeInUp, TRANSITION } from "@/lib/motion";
+import {
+  AlertCircle,
+  ChevronDown,
+  Download,
+  Loader2,
+  Pause,
+  Play,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 
 interface AudioPlayerCardProps {
   audioUrl?: string;
   displayName: string;
+  durationSeconds?: number;
   onDownload: () => void;
-  onSeekToProvided?: (seekTo: ((time: number, shouldPlay?: boolean) => void) | null) => void;
+  onSeekToProvided?: (
+    seekTo: ((time: number, shouldPlay?: boolean) => void) | null,
+  ) => void;
   pendingSeek?: number | null;
   isMobile: boolean;
-  isTinyScreen: boolean;
 }
 
-/**
- * Self-contained audio player card with full playback controls
- * Responsive design with mobile-optimized touch targets
- */
 export const AudioPlayerCard = memo(function AudioPlayerCardView({
   audioUrl,
   displayName,
+  durationSeconds,
   onDownload,
   onSeekToProvided,
   pendingSeek,
   isMobile,
-  isTinyScreen,
 }: AudioPlayerCardProps) {
   const {
     audioRef,
@@ -47,8 +55,11 @@ export const AudioPlayerCard = memo(function AudioPlayerCardView({
     isLoading: isAudioLoading,
     hasError: hasAudioError,
   } = useAudioPlayer(audioUrl);
+  const [isExpanded, setIsExpanded] = React.useState(false);
+  const collapsedDuration = duration
+    ? formattedDuration
+    : formatDuration(durationSeconds);
 
-  // Provide seekTo function to parent
   React.useEffect(() => {
     onSeekToProvided?.(seekTo);
 
@@ -57,122 +68,154 @@ export const AudioPlayerCard = memo(function AudioPlayerCardView({
     };
   }, [seekTo, onSeekToProvided]);
 
-
-
-  // Apply a pending seek when passed from parent
   React.useEffect(() => {
     if (pendingSeek == null) return;
     if (Number.isFinite(pendingSeek)) {
-      seekTo(pendingSeek, true).catch((err) => console.error('AudioPlayerCard: seek failed', err));
+      setIsExpanded(true);
+      seekTo(pendingSeek, true).catch((err) =>
+        console.error("AudioPlayerCard: seek failed", err),
+      );
     }
   }, [pendingSeek, seekTo]);
 
   if (!audioUrl) {
-    // Hide the player when there is no audio file URL
     return null;
   }
 
+  const handlePrimaryPlay = () => {
+    setIsExpanded(true);
+    void togglePlayPause();
+  };
+
   return (
-    <MotionDiv
-      variants={fadeInUp}
-      initial="hidden"
-      animate="visible"
-      layout
-    >
-      <Card className="border-border/50 bg-card/50 backdrop-blur-sm w-full">
-      <CardHeader className="pb-3 sm:pb-4 flex-row items-center justify-between space-y-0">
-        <CardTitle className="text-base sm:text-lg flex items-center gap-2 truncate">
-          <FileAudio className={`${isTinyScreen ? 'h-4 w-4' : 'h-5 w-5'} text-primary shrink-0`} />
-          <span className="truncate">{displayName}</span>
-        </CardTitle>
-        {!isMobile && (
-          <Button onClick={onDownload} variant="ghost" size="sm" className="shrink-0">
-            <Download className="h-4 w-4" />
+    <MotionDiv variants={fadeInUp} initial="hidden" animate="visible" layout>
+      <Card className="border-border/50 bg-card/50 w-full backdrop-blur-sm">
+        <audio
+          ref={audioRef}
+          src={audioUrl}
+          preload="metadata"
+          className="hidden"
+        />
+
+        <CardHeader className="flex-row items-center gap-3 space-y-0 p-3 sm:p-4">
+          <Button
+            size="icon"
+            className="h-10 w-10 shrink-0 rounded-full bg-black text-white shadow-sm hover:bg-black/90"
+            onClick={handlePrimaryPlay}
+            disabled={isAudioLoading || hasAudioError}
+            aria-label={isPlaying ? "Pause recording" : "Play recording"}
+          >
+            {isAudioLoading ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : isPlaying ? (
+              <Pause className="h-4 w-4" />
+            ) : (
+              <Play className="h-4 w-4" />
+            )}
           </Button>
-        )}
-      </CardHeader>
-      <CardContent className="space-y-3 sm:space-y-6 p-3 sm:p-6">
-        <audio ref={audioRef} src={audioUrl} preload="metadata" className="hidden" />
+          <CardTitle className="flex min-w-0 flex-1 items-center gap-2 text-sm sm:text-base">
+            <span className="truncate" title={displayName}>
+              {displayName}
+            </span>
+          </CardTitle>
+          <span className="text-muted-foreground shrink-0 text-xs tabular-nums sm:text-sm">
+            {collapsedDuration}
+          </span>
+          {!isMobile && (
+            <Button
+              onClick={onDownload}
+              variant="secondary"
+              size="sm"
+              className="h-8 shrink-0 gap-2"
+            >
+              <Download className="h-4 w-4" />
+              <span className="hidden sm:inline">Download</span>
+            </Button>
+          )}
+          <Button
+            onClick={() => setIsExpanded((expanded) => !expanded)}
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 shrink-0"
+            aria-expanded={isExpanded}
+            aria-label={
+              isExpanded ? "Collapse audio player" : "Expand audio player"
+            }
+          >
+            <ChevronDown
+              className={`h-4 w-4 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+            />
+          </Button>
+        </CardHeader>
 
-        {hasAudioError ? (
-          <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-3 sm:p-4 text-center">
-            <AlertCircle className="h-5 w-5 sm:h-6 sm:w-6 text-destructive mx-auto mb-2" />
-            <p className="text-destructive font-medium text-sm sm:text-base">Failed to load audio file</p>
-            <p className="text-destructive/80 text-xs sm:text-sm mt-1">
-              The audio file may be corrupted or in an unsupported format
-            </p>
-          </div>
-        ) : (
-          <div className="bg-gradient-to-r from-muted/50 to-muted/30 rounded-xl p-3 sm:p-4 md:p-6 space-y-3 sm:space-y-4">
-            {/* Playback Controls */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4 w-full"> 
-
-              <Button
-                size="icon"
-                className="h-10 w-10 sm:h-12 sm:w-12 bg-primary text-primary-foreground hover:bg-primary/90 rounded-full shadow-lg transition-all duration-200 active:scale-95 sm:hover:scale-105 flex-shrink-0 self-center"
-                onClick={togglePlayPause}
-                disabled={isAudioLoading}
-              >
-                {isAudioLoading ? (
-                  <Loader2 className="h-4 w-4 sm:h-5 sm:w-5 animate-spin" />
-                ) : isPlaying ? (
-                  <Pause className="h-4 w-4 sm:h-5 sm:w-5" />
-                ) : (
-                  <Play className="h-4 w-4 sm:h-5 sm:w-5" />
-                )}
-              </Button>
-
-              <div className="flex-1 min-w-0 space-y-1.5 sm:space-y-2">
-                <Slider
-                  value={[currentTime]}
-                  max={duration || 100}
-                  step={1}
-                  className="cursor-pointer touch-none"
-                  onValueChange={handleTimeSliderChange}
-                  disabled={!duration}
-                />
-                <div className="flex justify-between text-xs sm:text-sm text-muted-foreground">
-                  <span className="tabular-nums">{formattedCurrentTime}</span>
-                  <span className="tabular-nums truncate max-w-[50%]">{formattedDuration}</span>
+        <MotionDiv
+          initial={false}
+          animate={{
+            height: isExpanded ? "auto" : 0,
+            opacity: isExpanded ? 1 : 0,
+          }}
+          transition={TRANSITION.normal}
+          className="overflow-hidden"
+        >
+          <CardContent className="space-y-3 p-3 sm:space-y-4 sm:p-4">
+            {hasAudioError ? (
+              <div className="bg-destructive/10 border-destructive/20 rounded-lg border p-3 text-center sm:p-4">
+                <AlertCircle className="text-destructive mx-auto mb-2 h-5 w-5 sm:h-6 sm:w-6" />
+                <p className="text-destructive text-sm font-medium sm:text-base">
+                  Failed to load audio file
+                </p>
+                <p className="text-destructive/80 mt-1 text-xs sm:text-sm">
+                  The audio file may be corrupted or in an unsupported format
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="space-y-1.5 sm:space-y-2">
+                  <Slider
+                    value={[currentTime]}
+                    max={duration || 100}
+                    step={1}
+                    className="cursor-pointer touch-none"
+                    onValueChange={handleTimeSliderChange}
+                    disabled={!duration}
+                  />
+                  <div className="text-muted-foreground flex justify-between text-xs sm:text-sm">
+                    <span className="tabular-nums">{formattedCurrentTime}</span>
+                    <span className="max-w-[50%] truncate tabular-nums">
+                      {formattedDuration}
+                    </span>
+                  </div>
                 </div>
-              </div>
-            </div>
 
-            {/* Volume Controls */}
-            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
-              <div className="flex items-center gap-2 sm:gap-3 flex-1">
-                <Button variant="ghost" size="icon" onClick={toggleMute} className="h-8 w-8 sm:h-9 sm:w-9 flex-shrink-0">
-                  {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                </Button>
-                <Slider
-                  value={[displayVolume]}
-                  max={100}
-                  step={1}
-                  className="flex-1 cursor-pointer touch-none"
-                  onValueChange={handleVolumeSliderChange}
-                />
-                <span className="text-xs sm:text-sm text-muted-foreground w-10 sm:w-12 text-right tabular-nums flex-shrink-0">
-                  {Math.round(displayVolume)}%
-                </span>
-              </div>
-              {!isMobile && (
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 sm:gap-3">
                   <Button
-                    variant="outline"
-                    onClick={onDownload}
-                    className="hover:bg-muted w-full sm:w-auto"
+                    variant="ghost"
+                    size="icon"
+                    onClick={toggleMute}
+                    className="h-8 w-8 flex-shrink-0 sm:h-9 sm:w-9"
                   >
-                    <Download className="h-4 w-4 mr-2" />
-                    Download
+                    {isMuted ? (
+                      <VolumeX className="h-4 w-4" />
+                    ) : (
+                      <Volume2 className="h-4 w-4" />
+                    )}
                   </Button>
-
+                  <Slider
+                    value={[displayVolume]}
+                    max={100}
+                    step={1}
+                    className="flex-1 cursor-pointer touch-none"
+                    onValueChange={handleVolumeSliderChange}
+                  />
+                  <span className="text-muted-foreground w-10 flex-shrink-0 text-right text-xs tabular-nums sm:w-12 sm:text-sm">
+                    {Math.round(displayVolume)}%
+                  </span>
                 </div>
-              )}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+              </>
+            )}
+          </CardContent>
+        </MotionDiv>
+      </Card>
     </MotionDiv>
   );
 });

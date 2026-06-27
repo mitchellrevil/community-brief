@@ -1,12 +1,12 @@
 /**
  * Audio recordings API type definitions
- * 
+ *
  * These types define the shape of job/recording data from the backend.
  * For backend sources, see: backend_app/app/services/job_service.py
  */
 
 // Re-export PaginatedResponse from common for convenience
-export type { PaginatedResponse } from './common';
+export type { PaginatedResponse } from "./common";
 
 /**
  * Analysis attempt record for multi-attempt analysis
@@ -24,15 +24,15 @@ export interface AnalysisAttempt {
 /**
  * Job status values
  */
-export type JobStatus = 
-  | "uploaded" 
-  | "pending" 
-  | "processing" 
-  | "transcribing" 
-  | "transcribed" 
-  | "analysing" 
-  | "completed" 
-  | "error" 
+export type JobStatus =
+  | "uploaded"
+  | "pending"
+  | "processing"
+  | "transcribing"
+  | "transcribed"
+  | "analysing"
+  | "completed"
+  | "error"
   | "failed";
 
 /**
@@ -61,6 +61,7 @@ export interface AudioRecording {
   _ts: number;
   // Optional fields that may be present
   displayname?: string;
+  display_name?: string;
   audio_duration_seconds?: number;
   audio_duration_minutes?: number;
   pre_session_form_data?: Record<string, unknown>;

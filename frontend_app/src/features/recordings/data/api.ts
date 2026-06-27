@@ -727,8 +727,8 @@ export async function fetchAllJobsApi(limit: number = 50, offset: number = 0, us
 }
 
 interface AnalysisDocumentUpdateRequest {
-  html_content: string;
-  format?: string;
+  markdown_content: string;
+  analysis_file_path?: string;
 }
 
 interface AnalysisDocumentUpdateResponse {
@@ -739,95 +739,16 @@ interface AnalysisDocumentUpdateResponse {
 }
 
 export async function updateAnalysisDocument(
-  jobId: string, 
-  textContent: string
+  jobId: string,
+  textContent: string,
+  analysisFilePath?: string
 ): Promise<AnalysisDocumentUpdateResponse> {
-  const htmlContent = textContent
-    .split('\n\n')
-    .map(section => {
-      const lines = section.split('\n').filter(line => line.trim());
-      if (lines.length === 0) return '';
-      const firstLine = lines[0].trim();
-      const markdownHeadingMatch = firstLine.match(/^(#+)\s+(.+?)(:?)$/);
-      const isMarkdownHeading = !!markdownHeadingMatch;
-      const isColonHeading = (
-        firstLine.length < 80 &&
-        (firstLine.endsWith(':') || firstLine.endsWith('::') || 
-         /^[A-Z][A-Z\s]*:*$/.test(firstLine))
-      );
-      const isHeading = isMarkdownHeading || isColonHeading;
-      
-      if (isHeading && lines.length > 1) {
-        let headingText: string;
-        if (markdownHeadingMatch) {
-          headingText = markdownHeadingMatch[2].replace(/:+$/, '').trim();
-        } else {
-          headingText = firstLine.replace(/^#+\s*/, '').replace(/:+$/, '').trim();
-        }
-        const heading = `<h3>${headingText}</h3>`;
-        const contentLines = lines.slice(1);
-        const listItems: Array<string> = [];
-        const paragraphs: Array<string> = [];
-        let currentParagraph = '';
-        contentLines.forEach(line => {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('•') || trimmed.startsWith('-') || /^\d+\./.test(trimmed)) {
-            if (currentParagraph) {
-              paragraphs.push(`<p>${currentParagraph}</p>`);
-              currentParagraph = '';
-            }
-            const itemText = trimmed.replace(/^([•-]|\d+\.)\s*/, '');
-            listItems.push(`<li>${itemText}</li>`);
-          } else if (trimmed) {
-            if (currentParagraph) {
-              currentParagraph += ' ' + trimmed;
-            } else {
-              currentParagraph = trimmed;
-            }
-          }
-        });
-        if (currentParagraph) paragraphs.push(`<p>${currentParagraph}</p>`);
-        let html = heading;
-        if (paragraphs.length > 0) html += paragraphs.join('');
-        if (listItems.length > 0) html += `<ul>${listItems.join('')}</ul>`;
-        return html;
-      } else {
-        const listItems: Array<string> = [];
-        const paragraphs: Array<string> = [];
-        let currentParagraph = '';
-        lines.forEach(line => {
-          const trimmed = line.trim();
-          if (trimmed.startsWith('•') || trimmed.startsWith('-') || /^\d+\./.test(trimmed)) {
-            if (currentParagraph) {
-              paragraphs.push(`<p>${currentParagraph}</p>`);
-              currentParagraph = '';
-            }
-            const itemText = trimmed.replace(/^([•-]|\d+\.)\s*/, '');
-            listItems.push(`<li>${itemText}</li>`);
-          } else if (trimmed) {
-            if (currentParagraph) {
-              currentParagraph += ' ' + trimmed;
-            } else {
-              currentParagraph = trimmed;
-            }
-          }
-        });
-        if (currentParagraph) paragraphs.push(`<p>${currentParagraph}</p>`);
-        let html = '';
-        if (paragraphs.length > 0) html += paragraphs.join('');
-        if (listItems.length > 0) html += `<ul>${listItems.join('')}</ul>`;
-        return html;
-      }
-    })
-    .filter(section => section.trim())
-    .join('');
-
   const requestBody: AnalysisDocumentUpdateRequest = {
-    html_content: htmlContent,
-    format: "docx"
+    markdown_content: textContent,
+    analysis_file_path: analysisFilePath,
   };
 
-  const response = await httpClient.put(`${JOBS_API}/${jobId}/analysis-document`, requestBody);
+  const response = await httpClient.put(JOB_ANALYSIS_DOCUMENT_API(jobId), requestBody);
   return response.data;
 }
 

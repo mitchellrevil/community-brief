@@ -1,10 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import {
-  
-  normalizeAnalysisAttempts
-} from '../components/lazy/documentViewerAttempts';
-import type {AnalysisAttempt} from '../components/lazy/documentViewerAttempts';
+import type { AnalysisAttempt } from "../components/lazy/documentViewerAttempts";
+import { normalizeAnalysisAttempts } from "../components/lazy/documentViewerAttempts";
 
 interface UseAnalysisAttemptNavigationParams {
   analysisAttempts?: Array<AnalysisAttempt>;
@@ -24,7 +21,7 @@ export function useAnalysisAttemptNavigation({
   const hasInitializedAttemptRef = useRef(false);
 
   useEffect(() => {
-    const latest = normalizedAttempts.length - 1;
+    const latest = Math.max(normalizedAttempts.length - 1, 0);
     if (!hasInitializedAttemptRef.current) {
       hasInitializedAttemptRef.current = true;
       setAttemptIndex(latest);
@@ -38,13 +35,18 @@ export function useAnalysisAttemptNavigation({
     });
   }, [normalizedAttempts.length]);
 
-  const activeAttempt = normalizedAttempts.length > 0 ? normalizedAttempts[attemptIndex] : undefined;
-  const activeAnalysisFilePath = activeAttempt?.analysis_file_path || analysisFilePath;
+  const activeAttempt =
+    normalizedAttempts.length > 0
+      ? normalizedAttempts[attemptIndex]
+      : undefined;
+  const activeAnalysisFilePath =
+    activeAttempt?.analysis_file_path || analysisFilePath;
   const activeAttemptNumber = activeAttempt?.attempt ?? attemptIndex + 1;
   const totalAttempts = Math.max(normalizedAttempts.length, 1);
 
   const shouldUseProvidedText =
-    normalizedAttempts.length === 0 || attemptIndex === normalizedAttempts.length - 1;
+    normalizedAttempts.length === 0 ||
+    attemptIndex === normalizedAttempts.length - 1;
 
   return {
     activeAnalysisFilePath,

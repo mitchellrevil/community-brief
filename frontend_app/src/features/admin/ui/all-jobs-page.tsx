@@ -37,11 +37,15 @@ import { UserSelect } from "@/features/users/ui/UserSelect";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { RecordingCardSkeletonGrid } from "@/components/ui/recording-card-skeleton";
 import { EnhancedPagination } from "@/components/ui/pagination";
+import { getDisplayName } from "@/lib/display-name-utils";
 
 type Job = {
   id: string;
   user_id: string;
+  displayname?: string;
+  display_name?: string;
   file_name?: string;
+  filename?: string;
   file_path?: string;
   status?: string;
   created_at?: string;
@@ -308,6 +312,7 @@ function JobCard({
   const ownerDisplay = ownerInfo
     ? ownerInfo.name || ownerInfo.email
     : job.user_email || "Unknown user";
+  const displayName = getDisplayName(job);
 
   return (
     <Card className="bg-card/90 border border-border/60 hover:border-border hover:shadow-lg transition-all duration-200 backdrop-blur-sm">
@@ -315,7 +320,7 @@ function JobCard({
         <div className="flex items-start justify-between">
           <div className="space-y-1 flex-1 min-w-0">
             <CardTitle className="text-base font-medium truncate">
-              {job.file_name || "Unknown Recording"}
+              {displayName}
             </CardTitle>
             <div className="flex items-center gap-2">
               <StatusBadge
@@ -357,7 +362,7 @@ function JobCard({
               // Store all jobs data in localStorage for access on detail page
               localStorage.setItem("cachedJobs", JSON.stringify(allJobs));
               localStorage.setItem("current_recording_id", job.id);
-              window.location.href = `/audio-recordings/${job.id}`;
+              window.location.href = `/audio-recordings/${job.id}?from=all-files`;
             }}
           >
             View Details
