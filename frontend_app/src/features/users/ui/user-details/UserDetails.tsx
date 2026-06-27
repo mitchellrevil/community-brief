@@ -1,20 +1,21 @@
-import { useParams } from "@tanstack/react-router";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Skeleton } from "@/components/ui/skeleton";
+import { fetchUserById } from "@/features/users/data/api";
 import { useQuery } from "@tanstack/react-query";
+import { useParams } from "@tanstack/react-router";
 import { AlertCircle } from "lucide-react";
+
 import { UserDetailsHeader } from "./UserDetailsHeader";
 import { UserDetailsTabs } from "./UserDetailsTabs";
-import { fetchUserById } from "@/features/users/data/api";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
-export function UserDetailsV2() {
+export function UserDetails() {
   // @ts-ignore - params are typed in the route definition
   const { userId } = useParams({ from: "/_layout/admin/users/$userId" });
 
-  const { 
-    data: user, 
-    isLoading, 
-    error 
+  const {
+    data: user,
+    isLoading,
+    error,
   } = useQuery({
     queryKey: ["user", userId],
     queryFn: () => fetchUserById(userId),
@@ -43,7 +44,8 @@ export function UserDetailsV2() {
           <AlertCircle className="h-4 w-4" />
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>
-            Failed to load user details. {(error as Error).message || "User not found."}
+            Failed to load user details.{" "}
+            {(error as Error).message || "User not found."}
           </AlertDescription>
         </Alert>
       </div>
@@ -51,11 +53,9 @@ export function UserDetailsV2() {
   }
 
   return (
-    <div className="space-y-6 p-4 sm:p-6 max-w-7xl mx-auto">
+    <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
       <UserDetailsHeader user={user} />
       <UserDetailsTabs user={user} />
     </div>
   );
 }
-
-

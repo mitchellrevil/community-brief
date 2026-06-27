@@ -1,27 +1,48 @@
 /**
- * AudioRecordingCardV2 component tests
- * 
+ * AudioRecordingCard component tests
+ *
  * Tests for the audio recording card component, including dropdown menu
  * behavior to ensure it doesn't cause layout shift.
  */
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as React from "react";
+import { AudioRecordingCard } from "@/features/recordings/ui/AudioRecordingCard";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import * as React from "react";
-import { AudioRecordingCardV2 } from "@/features/recordings/ui/AudioRecordingCardV2";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock TanStack Router Link
 vi.mock("@tanstack/react-router", () => ({
-  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string; [key: string]: unknown }) => (
-    <a href={to} {...props}>{children}</a>
+  Link: ({
+    children,
+    to,
+    ...props
+  }: {
+    children: React.ReactNode;
+    to: string;
+    [key: string]: unknown;
+  }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
   ),
 }));
 
 // Mock EditableDisplayName to avoid complex dependencies
 vi.mock("@/components/ui/editable-display-name", () => ({
-  EditableDisplayName: ({ job }: { job: { displayname?: string; display_name?: string; file_name?: string; filename?: string } }) => (
-    <span data-testid="display-name">{job.displayname || job.display_name || job.file_name || job.filename}</span>
+  EditableDisplayName: ({
+    job,
+  }: {
+    job: {
+      displayname?: string;
+      display_name?: string;
+      file_name?: string;
+      filename?: string;
+    };
+  }) => (
+    <span data-testid="display-name">
+      {job.displayname || job.display_name || job.file_name || job.filename}
+    </span>
   ),
 }));
 
@@ -37,7 +58,7 @@ const mockRecording = {
   user_id: "user-1",
 };
 
-describe("AudioRecordingCardV2", () => {
+describe("AudioRecordingCard", () => {
   const defaultProps = {
     recording: mockRecording,
     onViewDetails: vi.fn(),
@@ -54,42 +75,49 @@ describe("AudioRecordingCardV2", () => {
 
   describe("Dropdown Menu", () => {
     it("renders dropdown menu trigger button", () => {
-      render(<AudioRecordingCardV2 {...defaultProps} />);
-      
+      render(<AudioRecordingCard {...defaultProps} />);
+
       const menuButton = screen.getByRole("button", { name: /open menu/i });
       expect(menuButton).toBeInTheDocument();
     });
 
     it("opens dropdown menu when trigger is clicked", async () => {
       const user = userEvent.setup();
-      render(<AudioRecordingCardV2 {...defaultProps} />);
-      
+      render(<AudioRecordingCard {...defaultProps} />);
+
       const menuButton = screen.getByRole("button", { name: /open menu/i });
       await user.click(menuButton);
-      
+
       // Dropdown items should be visible
       await waitFor(() => {
-        expect(screen.getByRole("menuitem", { name: /view details/i })).toBeInTheDocument();
+        expect(
+          screen.getByRole("menuitem", { name: /view details/i }),
+        ).toBeInTheDocument();
       });
     });
 
     it("dropdown menu renders in a portal (outside card container)", async () => {
       const user = userEvent.setup();
       const { container } = render(
-        <div data-testid="card-container" style={{ width: "300px", overflow: "hidden" }}>
-          <AudioRecordingCardV2 {...defaultProps} />
-        </div>
+        <div
+          data-testid="card-container"
+          style={{ width: "300px", overflow: "hidden" }}
+        >
+          <AudioRecordingCard {...defaultProps} />
+        </div>,
       );
-      
+
       const menuButton = screen.getByRole("button", { name: /open menu/i });
       await user.click(menuButton);
-      
+
       await waitFor(() => {
         const menuContent = screen.getByRole("menu");
         expect(menuContent).toBeInTheDocument();
-        
+
         // The menu should be rendered outside the card container (in a portal)
-        const cardContainer = container.querySelector('[data-testid="card-container"]');
+        const cardContainer = container.querySelector(
+          '[data-testid="card-container"]',
+        );
         expect(cardContainer?.contains(menuContent)).toBe(false);
       });
     });
@@ -97,54 +125,60 @@ describe("AudioRecordingCardV2", () => {
     it("opening dropdown does not change card container dimensions", async () => {
       const user = userEvent.setup();
       const { container } = render(
-        <div 
-          data-testid="card-container" 
+        <div
+          data-testid="card-container"
           style={{ width: "300px", display: "inline-block" }}
         >
-          <AudioRecordingCardV2 {...defaultProps} />
-        </div>
+          <AudioRecordingCard {...defaultProps} />
+        </div>,
       );
-      
-      const cardContainer = container.querySelector('[data-testid="card-container"]') as HTMLElement;
+
+      const cardContainer = container.querySelector(
+        '[data-testid="card-container"]',
+      ) as HTMLElement;
       const initialWidth = cardContainer.offsetWidth;
-      
+
       const menuButton = screen.getByRole("button", { name: /open menu/i });
       await user.click(menuButton);
-      
+
       await waitFor(() => {
         expect(screen.getByRole("menu")).toBeInTheDocument();
       });
-      
+
       // Width should remain unchanged after dropdown opens
       expect(cardContainer.offsetWidth).toBe(initialWidth);
     });
 
     it("calls onViewDetails when View Details menu item is clicked", async () => {
       const user = userEvent.setup();
-      render(<AudioRecordingCardV2 {...defaultProps} />);
-      
+      render(<AudioRecordingCard {...defaultProps} />);
+
       const menuButton = screen.getByRole("button", { name: /open menu/i });
       await user.click(menuButton);
-      
+
       await waitFor(() => {
-        expect(screen.getByRole("menuitem", { name: /view details/i })).toBeInTheDocument();
+        expect(
+          screen.getByRole("menuitem", { name: /view details/i }),
+        ).toBeInTheDocument();
       });
-      
+
       await user.click(screen.getByRole("menuitem", { name: /view details/i }));
       expect(defaultProps.onViewDetails).toHaveBeenCalledTimes(1);
     });
 
     it("calls onDelete when Delete menu item is clicked", async () => {
       const user = userEvent.setup();
-      render(<AudioRecordingCardV2 {...defaultProps} />);
-      
+      render(<AudioRecordingCard {...defaultProps} />);
+
       const menuButton = screen.getByRole("button", { name: /open menu/i });
       await user.click(menuButton);
-      
+
       await waitFor(() => {
-        expect(screen.getByRole("menuitem", { name: /delete/i })).toBeInTheDocument();
+        expect(
+          screen.getByRole("menuitem", { name: /delete/i }),
+        ).toBeInTheDocument();
       });
-      
+
       await user.click(screen.getByRole("menuitem", { name: /delete/i }));
       expect(defaultProps.onDelete).toHaveBeenCalledTimes(1);
     });
@@ -152,22 +186,26 @@ describe("AudioRecordingCardV2", () => {
 
   describe("Card Rendering", () => {
     it("renders recording display name", () => {
-      render(<AudioRecordingCardV2 {...defaultProps} />);
-      
-      expect(screen.getByTestId("display-name")).toHaveTextContent("Test Recording");
+      render(<AudioRecordingCard {...defaultProps} />);
+
+      expect(screen.getByTestId("display-name")).toHaveTextContent(
+        "Test Recording",
+      );
     });
 
     it("renders status badge", () => {
-      render(<AudioRecordingCardV2 {...defaultProps} />);
-      
+      render(<AudioRecordingCard {...defaultProps} />);
+
       // Status badge should show completed status
       expect(screen.getByText(/completed/i)).toBeInTheDocument();
     });
 
     it("renders View Details button", () => {
-      render(<AudioRecordingCardV2 {...defaultProps} />);
-      
-      expect(screen.getByRole("button", { name: /view details/i })).toBeInTheDocument();
+      render(<AudioRecordingCard {...defaultProps} />);
+
+      expect(
+        screen.getByRole("button", { name: /view details/i }),
+      ).toBeInTheDocument();
     });
   });
 });
