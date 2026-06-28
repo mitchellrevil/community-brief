@@ -1,65 +1,196 @@
-# Environment files and local secrets
+# Ignore environment files and secrets
 .env
 .env.*
-!.env.example
-!**/.env.example
-!**/.env.sample
 local.settings.json
-!**/local.settings.json.example
 
 # Python
 __pycache__/
 *.py[cod]
-*.egg-info/
 .venv/
 venv/
 env/
-.pytest_cache/
-.mypy_cache/
-.coverage
-htmlcov/
-
-# Node / frontend
+*.egg-info/
+ARCHITECTURE_REVIEW.md
+# Node
 node_modules/
 dist/
 build/
-dev-dist/
-coverage/
-playwright-report/
-test-results/
 frontend_app/dist/
-frontend_app/playwright-report/
-frontend_app/test-results/
-frontend_app/e2e/storageState*.json
+.vscode/
+# Logs
+*.log
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
 
 # Azure / deployment artifacts
-artifacts/
-.python_packages/
-bin/
-obj/
-*.zip
-infra/main.json
-
-# Terraform / infra local state
-infra/.terraform/
-infra/.terraform.lock.hcl
-infra/*.tfstate
-infra/*.tfstate.*
-infra/*.tfvars
-infra/*.tfvars.json
-infra/crash.log
-infra/crash.*.log
-
-# Logs and OS/editor files
-*.log
-logs/
-.DS_Store
-*.swp
-*.swo
-.idea/
-.vscode/
+backend.zip
+az-func-audio/host.json
 
 # Certificates and keys
 *.pem
 *.key
-*.pfx
+# Backend specific
+infra/.terraform.lock.hcl
+.$ArchDesign.drawio.bkp
+/backend/.env
+/backend/.env.test
+/backend/venv/# Ignore CLI configuration files in infra/
+infra/.terraformrc
+infra/terraform.rc
+infra/terraform.tfvars
+infra/terraform.tfvars.json
+infra/*_credentials.tfvars
+backend_app/run_server.py
+backend_app/start_backend.bat
+backend_app/.env
+/backend/uploads/
+/backend/temp/
+/frontend/.next/
+/frontend/.vscode/
+/frontend/node_modules/
+az_func_audio_processor/.venv/
+az_func_audio_processor/.vscode/
+az_func_audio_processor/.local/
+az_func_audio_processor/.pytest_cache/
+az_func_audio_processor/.serverless/
+az_func_audio_processor/.serverless_plugins/
+az_func_audio_processor/.serverless_plugins_cache/
+az_func_audio_processor/.serverless-state.json
+az_func_audio_processor/__pycache__
+az_func_audio_processor/.env
+**.env
+.github
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# IDE
+.idea/
+.vscode/
+
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+logs/
+
+# Test coverage
+.coverage
+htmlcov/
+.tox/
+.nox/
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Azure Functions
+local.settings.json
+bin/
+obj/
+
+# Dependencies
+node_modules/
+package-lock.json
+yarn.lock
+
+# Build outputs
+/dist/
+/build/
+/.next/
+/out/
+
+
+infra/.terraform.lock.hcl
+infra/deploy.bat
+
+# Misc
+.DS_Store
+*.pem
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local 
+
+# Ignore .terraform directories in infra/
+infra/.terraform/
+infra/.terraform/*
+
+# Ignore state files in infra/
+infra/*.tfstate
+infra/*.tfstate.*
+
+# Ignore crash logs in infra/
+infra/crash.log
+infra/crash.*.log
+
+# Ignore override files in infra/
+infra/override.tf
+infra/override.tf.json
+infra/*_override.tf
+infra/*_override.tf.json
+
+# Ignore CLI configuration files in infra/
+infra/.terraformrc
+infra/terraform.rc
+infra/terraform.tfvars
+infra/terraform.tfvars.json
+infra/*_credentials.tfvars
+backend_app/run_server.py
+.gitignore
+backend_app/start_backend.bat
+# Ignore CLI configuration files in infra/
+infra/.terraformrc
+infra/terraform.rc
+infra/terraform.tfvars
+infra/terraform.tfvars.json
+infra/*_credentials.tfvars
+backend_app/run_server.py
+backend_app/start_backend.bat
+backend_app/.env
+dev-dist/
+dist/
+node_modules/
+.env.local
+plan-astHardCutover.prompt.md
+frontend_app/docs/FRONTEND_CONVENTIONS.md
+
+# Playwright (E2E)
+frontend_app/e2e/storageState*.json
+frontend_app/playwright-report/
+frontend_app/test-results/
+playwright-report/
+test-results/
