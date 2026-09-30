@@ -1,0 +1,4 @@
+export const DEFAULT_RECORDING_DISCLAIMER = `It is important that you ask permission to record the meeting. Those who will speak will introduce themselves and their role to acknowledge this.
+To ensure the accuracy of the transcription, we request that each participant introduces themselves at the beginning of the session. This introduction will help the AI tool create a voice profile for better voice recognition and transcription. All recordings and transcriptions will be kept confidential.
+To gain consent from everyone firstly start the recording and read out the below:
+[My name is xx] I am using Community Brief tool to record, transcribe and summarize this meeting. I am seeking consent to use this tool. If you agree, please introduce your name and role in turn. [Individuals say their name and role]`;

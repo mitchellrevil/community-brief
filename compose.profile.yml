@@ -1,0 +1,54 @@
+name: community-b3-profile
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.profile
+      target: backend
+    env_file:
+      - backend_app/.env
+    environment:
+      ENVIRONMENT: production
+      CORS_ORIGINS: http://localhost:3000
+      AUTH_COOKIE_SECURE: "false"
+      WEB_CONCURRENCY: "${WEB_CONCURRENCY:-2}"
+    cpus: 2.0
+    mem_limit: 3584m
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    ports:
+      - "8000:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  function:
+    build:
+      context: .
+      dockerfile: Dockerfile.profile
+      target: function
+    env_file:
+      - az-func-audio/.env
+    environment:
+      AzureFunctionsJobHost__functions__0: ReprocessAnalysisQueue
+      FUNCTIONS_WORKER_PROCESS_COUNT: "1"
+    cpus: 2.0
+    mem_limit: 3584m
+    cap_add:
+      - SYS_PTRACE
+    security_opt:
+      - seccomp:unconfined
+    ports:
+      - "7071:80"
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent http://127.0.0.1/ > /dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s

@@ -1,0 +1,381 @@
+import { memo } from "react";
+import {
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  Folder as FolderIcon,
+  FolderOpen,
+  Loader2,
+  Search,
+  Upload,
+} from "lucide-react";
+import type {
+  PromptTemplate,
+  Folder as TemplateFolder,
+} from "@/shared/data/templates";
+import { PromptMetadataBadge } from "@/components/ui/prompt-metadata-badge";
+
+export interface CategorySelectorProps {
+  categories: Array<TemplateFolder>;
+  subcategories: Array<PromptTemplate>;
+  currentCategory: string | undefined;
+  currentSubcategory: string | undefined;
+  expandedCategories: Set<string>;
+  categorySearch: string;
+  setCategorySearch: (search: string) => void;
+  isLoadingCategories: boolean;
+  isFetchingNextPage: boolean;
+  hasNextPage: boolean;
+  toggleCategory: (categoryId: string) => void;
+  handleCategorySelect: (id: string) => void;
+  handleSubcategorySelect: (id: string) => void;
+  getSubcategoriesForCategory: (categoryId: string) => Array<PromptTemplate>;
+  sentinelRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+function CategorySelectorComponent({
+  categories,
+  subcategories,
+  currentCategory,
+  currentSubcategory,
+  expandedCategories,
+  categorySearch,
+  setCategorySearch,
+  isLoadingCategories,
+  isFetchingNextPage,
+  hasNextPage,
+  toggleCategory,
+  handleCategorySelect,
+  handleSubcategorySelect,
+  getSubcategoriesForCategory,
+  sentinelRef,
+}: CategorySelectorProps) {
+  // Build children-by-parent map
+  const childrenByParent: Partial<Record<string, Array<TemplateFolder>>> = {};
+  categories.forEach((cat) => {
+    const pid = cat.parent_id;
+    if (pid) {
+      childrenByParent[pid] = childrenByParent[pid] ?? [];
+      childrenByParent[pid].push(cat);
+    }
+  });
+
+  // Sort children alphabetically
+  Object.keys(childrenByParent).forEach((parentId) => {
+    if (!childrenByParent[parentId]) return;
+    childrenByParent[parentId].sort((a, b) => a.name.localeCompare(b.name));
+  });
+
+  const rootCategories = categories
+    .filter((cat) => !cat.parent_id)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  const normalizedSearch = categorySearch.trim().toLowerCase();
+  const filteredRoots = normalizedSearch
+    ? rootCategories.filter(
+        (r) =>
+          r.name.toLowerCase().includes(normalizedSearch) ||
+          (childrenByParent[r.id] ?? []).some((ch) =>
+            ch.name.toLowerCase().includes(normalizedSearch),
+          ),
+      )
+    : rootCategories;
+
+  return (
+    <div
+      className={`bg-card/60 flex w-full flex-col overflow-hidden rounded-xl border backdrop-blur-sm lg:w-80`}
+    >
+      {/* Header */}
+      <div className="border-border border-b p-3 sm:p-4">
+        <div className="mb-2 flex items-center justify-between sm:mb-3">
+          <h4 className="text-foreground text-sm font-semibold sm:text-base">
+            Categories & Meeting Types
+          </h4>
+        </div>
+        <div className="relative">
+          <Search
+            className="text-muted-foreground absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 transform"
+            aria-hidden="true"
+          />
+          <input
+            type="text"
+            value={categorySearch}
+            onChange={(e) => setCategorySearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+              }
+            }}
+            placeholder={
+              isLoadingCategories ? "Loading..." : "Search categories..."
+            }
+            className="border-border bg-background focus:ring-primary/20 focus:border-primary/50 w-full rounded-md border py-2 pr-4 pl-10 text-sm focus:ring-2 focus:outline-none"
+            disabled={isLoadingCategories}
+            aria-label="Search categories and meeting types"
+          />
+        </div>
+      </div>
+
+      {/* Tree View */}
+      <div className="h-[40vh] overflow-y-auto p-2 lg:flex-1">
+        {/* Screen reader loading announcement */}
+        {(isLoadingCategories || isFetchingNextPage) && (
+          <div className="sr-only" role="status" aria-live="polite">
+            Loading categories...
+          </div>
+        )}
+
+        {categories.length === 0 && (
+          <div className="text-muted-foreground p-4 text-center text-sm">
+            <div className="space-y-2">
+              <Upload className="mx-auto h-6 w-6 text-gray-400 sm:h-8 sm:w-8" />
+              <p className="text-xs sm:text-sm">No service areas available.</p>
+            </div>
+          </div>
+        )}
+
+        <div
+          className="space-y-0.5"
+          role="tree"
+          aria-label="Categories and meeting types"
+        >
+          {filteredRoots.map((category) => {
+            const categoryId = category.id;
+            const isExpanded = expandedCategories.has(categoryId);
+            const isSelected = currentCategory === categoryId;
+            const subcats = getSubcategoriesForCategory(categoryId).sort(
+              (a, b) => a.name.localeCompare(b.name),
+            );
+            const childCats = (childrenByParent[categoryId] ?? []).filter(
+              (child) =>
+                !normalizedSearch ||
+                child.name.toLowerCase().includes(normalizedSearch),
+            );
+
+            return (
+              <div
+                key={categoryId}
+                className="select-none"
+                role="treeitem"
+                aria-expanded={isExpanded}
+                aria-selected={isSelected}
+              >
+                <div
+                  className={`group flex cursor-pointer items-center rounded-lg px-3 py-2 transition-all duration-200 ${
+                    isSelected
+                      ? "bg-gray-100 text-gray-700 shadow-sm dark:bg-gray-900/50 dark:text-gray-300"
+                      : "text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-800"
+                  }`}
+                >
+                  <button
+                    type="button"
+                    className="mr-2 rounded-md p-1 transition-colors hover:bg-gray-200 dark:hover:bg-gray-700"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleCategory(categoryId);
+                    }}
+                    aria-label={
+                      isExpanded
+                        ? `Collapse ${category.name}`
+                        : `Expand ${category.name}`
+                    }
+                  >
+                    {subcats.length + childCats.length > 0 ? (
+                      isExpanded ? (
+                        <ChevronDown className="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
+                      ) : (
+                        <ChevronRight className="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
+                      )
+                    ) : (
+                      <div className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+
+                  <div
+                    className="flex min-w-0 flex-1 items-center"
+                    onClick={() => handleCategorySelect(categoryId)}
+                  >
+                    {isExpanded ? (
+                      <FolderOpen className="mr-3 h-4 w-4 flex-shrink-0 text-gray-500 dark:text-gray-400" />
+                    ) : (
+                      <FolderIcon className="mr-3 h-4 w-4 flex-shrink-0 text-gray-600 dark:text-gray-400" />
+                    )}
+
+                    <span className="flex-1 truncate text-sm font-medium">
+                      {category.name}
+                    </span>
+
+                    <span className="ml-3 flex-shrink-0 rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-gray-900/50 dark:text-gray-400">
+                      {subcats.length + childCats.length}
+                    </span>
+                  </div>
+                </div>
+
+                {isExpanded && (
+                  <div className="mt-2 ml-6 space-y-1 border-l-2 border-gray-200 pl-4 dark:border-gray-700">
+                    {/* Child categories (folders) */}
+                    {childCats.map((child) => {
+                      const childId = child.id;
+                      const isChildSelected = currentCategory === childId;
+                      const isChildExpanded = expandedCategories.has(childId);
+                      const childSubcats = getSubcategoriesForCategory(
+                        childId,
+                      ).sort((a, b) => a.name.localeCompare(b.name));
+
+                      return (
+                        <div key={childId} className="select-none">
+                          <div
+                            className={`group flex cursor-pointer items-center rounded-md px-3 py-1.5 transition-all duration-200 ${
+                              isChildSelected
+                                ? "bg-gray-50 text-gray-600 shadow-sm dark:bg-gray-900/30 dark:text-gray-400"
+                                : "text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/50"
+                            }`}
+                          >
+                            <button
+                              type="button"
+                              className="mr-2 rounded p-1 transition-colors hover:bg-gray-200 dark:hover:bg-gray-700"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCategory(childId);
+                              }}
+                            >
+                              {childSubcats.length > 0 ? (
+                                isChildExpanded ? (
+                                  <ChevronDown className="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
+                                ) : (
+                                  <ChevronRight className="h-3.5 w-3.5 text-gray-500 dark:text-gray-400" />
+                                )
+                              ) : (
+                                <div className="h-3.5 w-3.5" />
+                              )}
+                            </button>
+
+                            <div
+                              className="flex min-w-0 flex-1 items-center"
+                              onClick={() => handleCategorySelect(childId)}
+                            >
+                              <FolderIcon className="mr-3 h-4 w-4 flex-shrink-0 text-gray-500 dark:text-gray-400" />
+                              <span className="flex-1 truncate text-sm">
+                                {child.name}
+                              </span>
+                              <span className="ml-3 flex-shrink-0 rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600 dark:bg-gray-900/50 dark:text-gray-400">
+                                {childSubcats.length}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Meeting types under child category */}
+                          {isChildExpanded && childSubcats.length > 0 && (
+                            <div className="mt-2 ml-4 space-y-1">
+                              {childSubcats.map((subcategory) => {
+                                const subId = subcategory.id;
+                                const isSubSelected =
+                                  currentSubcategory === subId;
+
+                                return (
+                                  <div
+                                    key={subId}
+                                    className={`flex cursor-pointer items-center rounded-md px-3 py-1.5 transition-all duration-200 ${
+                                      isSubSelected
+                                        ? "bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary shadow-sm"
+                                        : "text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/50"
+                                    }`}
+                                    onClick={(e) => {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      handleSubcategorySelect(subId);
+                                    }}
+                                  >
+                                    <FileText className="text-primary dark:text-primary mr-3 h-4 w-4 flex-shrink-0" />
+                                    <span className="flex-1 truncate text-sm">
+                                      {subcategory.name}
+                                    </span>
+                                    <PromptMetadataBadge
+                                      metadata={subcategory.prompt_metadata}
+                                      className="ml-2"
+                                    />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+
+                    {/* Meeting types directly under root category */}
+                    {subcats.length > 0 && (
+                      <div className="space-y-1">
+                        {subcats.map((subcategory) => {
+                          const subId = subcategory.id;
+                          const isSubSelected = currentSubcategory === subId;
+
+                          return (
+                            <div
+                              key={subId}
+                              className={`flex cursor-pointer items-center rounded-md px-3 py-1.5 transition-all duration-200 ${
+                                isSubSelected
+                                  ? "bg-primary/10 dark:bg-primary/20 text-primary dark:text-primary shadow-sm"
+                                  : "text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800/50"
+                              }`}
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                handleSubcategorySelect(subId);
+                              }}
+                            >
+                              <FileText className="text-primary dark:text-primary mr-3 h-4 w-4 flex-shrink-0" />
+                              <span className="flex-1 truncate text-sm">
+                                {subcategory.name}
+                              </span>
+                              <PromptMetadataBadge
+                                metadata={subcategory.prompt_metadata}
+                                className="ml-2"
+                              />
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {filteredRoots.length === 0 && (
+            <div className="text-muted-foreground p-4 text-center text-sm">
+              No categories match "{categorySearch}"
+            </div>
+          )}
+
+          {/* Infinite scroll sentinel */}
+          {sentinelRef && <div ref={sentinelRef} className="h-1 w-full" />}
+
+          {/* Loading indicator */}
+          {isFetchingNextPage && (
+            <div className="flex items-center justify-center py-4">
+              <Loader2 className="text-primary h-5 w-5 animate-spin" />
+              <span className="text-muted-foreground ml-2 text-xs">
+                Loading more...
+              </span>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Footer */}
+      <div className="border-border border-t p-3 sm:p-4">
+        <div
+          className="text-xs text-gray-600 dark:text-gray-400"
+          aria-live="polite"
+        >
+          {categories.length} folders{hasNextPage ? " • scroll for more" : ""} •{" "}
+          {subcategories.length} types
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const CategorySelector = memo(CategorySelectorComponent);

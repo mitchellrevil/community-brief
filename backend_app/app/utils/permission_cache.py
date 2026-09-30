@@ -1,0 +1,243 @@
+from abc import ABC, abstractmethod
+from typing import Dict, Any, List, Optional
+import time
+import json
+from functools import wraps
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
+
+PERMISSION_CACHE_ERRORS = (RuntimeError, ValueError, TypeError, KeyError, AttributeError)
+
+class BasePermissionCache(ABC):
+    """Abstract base class for permission caching implementations"""
+    @abstractmethod
+    async def get_user_permission(self, user_id: str) -> Optional[str]:
+        pass
+    @abstractmethod
+    async def set_user_permission(self, user_id: str, permission: str, ttl: Optional[int] = None):
+        pass
+    @abstractmethod
+    async def get_users_by_permission(self, permission: str) -> Optional[List[Dict[str, Any]]]:
+        pass
+    @abstractmethod
+    async def set_users_by_permission(self, permission: str, users: List[Dict[str, Any]], ttl: Optional[int] = None):
+        pass
+    @abstractmethod
+    async def invalidate_user_cache(self, user_id: str):
+        pass
+    @abstractmethod
+    async def invalidate_permission_level_cache(self, permission: str):
+        pass
+    @abstractmethod
+    async def get_multiple_permissions(self, user_ids: List[str]) -> Dict[str, Optional[str]]:
+        pass
+    @abstractmethod
+    async def set_multiple_permissions(self, permissions: Dict[str, str], ttl: Optional[int] = None):
+        pass
+    @abstractmethod
+    async def get_cache_info(self) -> Dict[str, Any]:
+        pass
+
+class InMemoryPermissionCache(BasePermissionCache):
+    """In-memory implementation of permission cache."""
+    def __init__(self, key_prefix: str = "permission:", default_ttl: int = 300):
+        self.cache = {}
+        self.key_prefix = key_prefix
+        self.default_ttl = default_ttl
+        logger.info("in_memory_permission_cache_initialized", default_ttl_seconds=self.default_ttl)
+    async def get_user_permission(self, user_id: str) -> Optional[str]:
+        key = f"{self.key_prefix}user:{user_id}"
+        entry = self.cache.get(key)
+        if not entry:
+            return None
+        if time.time() > entry["expires"]:
+            self.cache.pop(key, None)
+            return None
+        return entry["value"]
+    async def set_user_permission(self, user_id: str, permission: str, ttl: Optional[int] = None):
+        if ttl is None:
+            ttl = self.default_ttl
+        key = f"{self.key_prefix}user:{user_id}"
+        self.cache[key] = {
+            "value": permission,
+            "expires": time.time() + ttl
+        }
+    async def get_users_by_permission(self, permission: str) -> Optional[List[Dict[str, Any]]]:
+        key = f"{self.key_prefix}permission_group:{permission}"
+        entry = self.cache.get(key)
+        if not entry:
+            return None
+        if time.time() > entry["expires"]:
+            self.cache.pop(key, None)
+            return None
+        return entry["value"]
+    async def set_users_by_permission(self, permission: str, users: List[Dict[str, Any]], ttl: Optional[int] = None):
+        if ttl is None:
+            ttl = self.default_ttl
+        key = f"{self.key_prefix}permission_group:{permission}"
+        self.cache[key] = {
+            "value": users,
+            "expires": time.time() + ttl
+        }
+    async def invalidate_user_cache(self, user_id: str):
+        keys_to_remove = [key for key in self.cache.keys() if f"user:{user_id}" in key]
+        for key in keys_to_remove:
+            self.cache.pop(key, None)
+    async def invalidate_permission_level_cache(self, permission: str):
+        keys_to_remove = [key for key in self.cache.keys() if f"permission_group:{permission}" in key]
+        for key in keys_to_remove:
+            self.cache.pop(key, None)
+    async def get_multiple_permissions(self, user_ids: List[str]) -> Dict[str, Optional[str]]:
+        result = {}
+        for user_id in user_ids:
+            result[user_id] = await self.get_user_permission(user_id)
+        return result
+    async def set_multiple_permissions(self, permissions: Dict[str, str], ttl: Optional[int] = None):
+        for user_id, permission in permissions.items():
+            await self.set_user_permission(user_id, permission, ttl)
+    async def get_cache_info(self) -> Dict[str, Any]:
+        try:
+            current_time = time.time()
+            permission_keys = [k for k in self.cache.keys() if k.startswith(self.key_prefix)]
+            valid_entries = sum(1 for k in permission_keys if current_time <= self.cache[k]["expires"])
+            total_size = 0
+            for key in permission_keys:
+                entry = self.cache[key]
+                key_size = len(key)
+                value_size = len(json.dumps(entry["value"])) if entry["value"] else 0
+                entry_size = key_size + value_size + 16
+                total_size += entry_size
+            return {
+                "total_permission_keys": len(permission_keys),
+                "valid_entries": valid_entries,
+                "expired_entries": len(permission_keys) - valid_entries,
+                "memory_usage_estimate_bytes": total_size,
+                "permission_key_prefix": self.key_prefix,
+                "default_ttl": self.default_ttl,
+                "cache_type": "in_memory",
+            }
+        except PERMISSION_CACHE_ERRORS as exc:
+            logger.error("permission_cache_info_failed", error=str(exc), exc_info=True)
+            return {"error": str(exc)}
+    def cache_permission_check(self, ttl: Optional[int] = None):
+        def decorator(func):
+            @wraps(func)
+            async def wrapper(user_id: str, *args, **kwargs):
+                cached_result = await self.get_user_permission(user_id)
+                if cached_result is not None:
+                    return cached_result
+                result = await func(user_id, *args, **kwargs)
+                if result is not None:
+                    await self.set_user_permission(user_id, result, ttl)
+                return result
+            return wrapper
+        return decorator
+
+class RedisPermissionCache(BasePermissionCache):
+    """Redis implementation of permission cache."""
+    def __init__(self, redis_url: str, key_prefix: str = "permission:", default_ttl: int = 300):
+        from redis import asyncio as aioredis
+        self.redis = aioredis.from_url(redis_url, decode_responses=True)
+        self.key_prefix = key_prefix
+        self.default_ttl = default_ttl
+        logger.info(
+            "redis_permission_cache_initialized",
+            key_prefix=self.key_prefix,
+            default_ttl_seconds=self.default_ttl,
+        )
+
+    async def get_user_permission(self, user_id: str) -> Optional[str]:
+        key = f"{self.key_prefix}user:{user_id}"
+        return await self.redis.get(key)
+
+    async def set_user_permission(self, user_id: str, permission: str, ttl: Optional[int] = None):
+        if ttl is None:
+            ttl = self.default_ttl
+        key = f"{self.key_prefix}user:{user_id}"
+        await self.redis.set(key, permission, ex=ttl)
+
+    async def get_users_by_permission(self, permission: str) -> Optional[List[Dict[str, Any]]]:
+        key = f"{self.key_prefix}permission_group:{permission}"
+        data = await self.redis.get(key)
+        return json.loads(data) if data else None
+
+    async def set_users_by_permission(self, permission: str, users: List[Dict[str, Any]], ttl: Optional[int] = None):
+        if ttl is None:
+            ttl = self.default_ttl
+        key = f"{self.key_prefix}permission_group:{permission}"
+        await self.redis.set(key, json.dumps(users), ex=ttl)
+
+    async def invalidate_user_cache(self, user_id: str):
+        # Scan for keys matching pattern
+        pattern = f"{self.key_prefix}user:{user_id}*"
+        async for key in self.redis.scan_iter(match=pattern):
+            await self.redis.delete(key)
+
+    async def invalidate_permission_level_cache(self, permission: str):
+        pattern = f"{self.key_prefix}permission_group:{permission}*"
+        async for key in self.redis.scan_iter(match=pattern):
+            await self.redis.delete(key)
+
+    async def get_multiple_permissions(self, user_ids: List[str]) -> Dict[str, Optional[str]]:
+        if not user_ids:
+            return {}
+        keys = [f"{self.key_prefix}user:{uid}" for uid in user_ids]
+        values = await self.redis.mget(keys)
+        return {uid: val for uid, val in zip(user_ids, values)}
+
+    async def set_multiple_permissions(self, permissions: Dict[str, str], ttl: Optional[int] = None):
+        if not permissions:
+            return
+        if ttl is None:
+            ttl = self.default_ttl
+        
+        async with self.redis.pipeline() as pipe:
+            for user_id, permission in permissions.items():
+                key = f"{self.key_prefix}user:{user_id}"
+                pipe.set(key, permission, ex=ttl)
+            await pipe.execute()
+
+    async def get_cache_info(self) -> Dict[str, Any]:
+        try:
+            info = await self.redis.info()
+            return {
+                "cache_type": "redis",
+                "used_memory_human": info.get("used_memory_human"),
+                "connected_clients": info.get("connected_clients"),
+                "permission_key_prefix": self.key_prefix,
+                "default_ttl": self.default_ttl
+            }
+        except PERMISSION_CACHE_ERRORS as exc:
+            logger.error("redis_permission_cache_info_failed", error=str(exc), exc_info=True)
+            return {"error": str(exc)}
+
+def _create_permission_cache(settings) -> BasePermissionCache:
+    try:
+        cache_settings = settings.cache
+
+        if cache_settings.cache_type.lower() == "redis" and cache_settings.redis_url:
+            try:
+                from redis import asyncio as aioredis
+                return RedisPermissionCache(
+                    redis_url=cache_settings.redis_url,
+                    key_prefix=cache_settings.key_prefix,
+                    default_ttl=cache_settings.default_ttl
+                )
+            except ImportError:
+                logger.warning("Redis package not installed, falling back to in-memory cache")
+            except PERMISSION_CACHE_ERRORS as exc:
+                logger.error("redis_permission_cache_initialization_failed", error=str(exc), exc_info=True)
+
+        return InMemoryPermissionCache(
+            key_prefix=cache_settings.key_prefix,
+            default_ttl=cache_settings.default_ttl
+        )
+    except PERMISSION_CACHE_ERRORS as exc:
+        logger.warning("permission_cache_settings_initialization_failed", error=str(exc), exc_info=True)
+        return InMemoryPermissionCache()
+
+
+def get_permission_cache(settings) -> BasePermissionCache:
+    """Return a permission cache instance respecting configuration."""
+    return _create_permission_cache(settings)

@@ -1,0 +1,503 @@
+"""Focused tests for the live hybrid transcription service."""
+
+from unittest.mock import Mock, patch
+
+import pytest
+
+from config import AppConfig
+from services.fast_transcription_service import (
+    FastTranscriptionService,
+    TranscriptionAPI,
+    TranscriptionServiceError,
+)
+
+
+def _mock_response(status_code: int, payload: dict, text: str = "") -> Mock:
+    response = Mock()
+    response.status_code = status_code
+    response.headers = {}
+    response.json.return_value = payload
+    response.text = text or ""
+    response.reason = text or ""
+    return response
+
+
+@pytest.fixture
+def mock_config() -> Mock:
+    config = Mock(spec=AppConfig)
+    config.speech_endpoint = "https://test-speech.cognitiveservices.azure.com"
+    config.speech_max_speakers = 10
+    config.speech_transcription_locale = "en-GB"
+    config.enable_fast_transcription = True
+    config.fast_transcription_duration_threshold_minutes = 120
+    config.fast_transcription_max_attempts = 3
+    config.fast_transcription_retry_base_seconds = 2
+    config.fast_transcription_retry_max_seconds = 60
+    return config
+
+
+@pytest.fixture
+def mock_credential() -> Mock:
+    credential = Mock()
+    token = Mock()
+    token.token = "test_token_12345"
+    token.expires_on = 9999999999
+    credential.get_token.return_value = token
+    return credential
+
+
+@pytest.fixture
+def service(mock_config: Mock, mock_credential: Mock) -> FastTranscriptionService:
+    return FastTranscriptionService(config=mock_config, credential=mock_credential)
+
+
+@pytest.fixture
+def service_fast_disabled(mock_config: Mock, mock_credential: Mock) -> FastTranscriptionService:
+    mock_config.enable_fast_transcription = False
+    return FastTranscriptionService(config=mock_config, credential=mock_credential)
+
+
+class TestRouting:
+    def test_uses_explicit_storage_credential_when_speech_uses_a_key(
+        self,
+        mock_config: Mock,
+    ):
+        mock_config.speech_key = "test-speech-key"
+        mock_config.storage_account_key = None
+        storage_credential = Mock()
+
+        service = FastTranscriptionService(
+            config=mock_config,
+            storage_credential=storage_credential,
+        )
+
+        assert service.credential is None
+        assert service.storage_credential is storage_credential
+
+    @patch("services.fast_transcription_service.BlobServiceClient")
+    def test_blob_size_lookup_uses_storage_credential(
+        self,
+        mock_blob_service_client: Mock,
+        mock_config: Mock,
+    ):
+        mock_config.storage_account_key = None
+        storage_credential = Mock()
+        blob_client = mock_blob_service_client.return_value.get_blob_client.return_value
+        blob_client.get_blob_properties.return_value.size = 1024
+        service = FastTranscriptionService(
+            config=mock_config,
+            storage_credential=storage_credential,
+        )
+
+        size = service._get_blob_file_size(
+            "https://test.blob.core.windows.net/recordings/audio.wav"
+        )
+
+        assert size == 1024
+        mock_blob_service_client.assert_called_once_with(
+            account_url="https://test.blob.core.windows.net",
+            credential=storage_credential,
+        )
+
+    def test_requires_ai_services_speech_endpoint(self, mock_config: Mock, mock_credential: Mock):
+        mock_config.speech_endpoint = None
+
+        with pytest.raises(ValueError, match="AZURE_SPEECH_ENDPOINT must be configured"):
+            FastTranscriptionService(config=mock_config, credential=mock_credential)
+
+    def test_routes_to_batch_when_fast_disabled(self, service_fast_disabled: FastTranscriptionService):
+        api_type, reason = service_fast_disabled.determine_api(
+            "https://test.blob.core.windows.net/recordings/audio.wav"
+        )
+
+        assert api_type == TranscriptionAPI.BATCH
+        assert "disabled" in reason.lower()
+
+    def test_routes_to_batch_when_size_unknown(self, service: FastTranscriptionService):
+        service._get_blob_file_size = Mock(return_value=None)
+
+        api_type, reason = service.determine_api(
+            "https://test.blob.core.windows.net/recordings/audio.wav"
+        )
+
+        assert api_type == TranscriptionAPI.BATCH
+        assert "size unavailable" in reason.lower()
+
+    def test_routes_to_batch_when_duration_missing(self, service: FastTranscriptionService):
+        api_type, reason = service.determine_api(
+            "https://test.blob.core.windows.net/recordings/audio.wav",
+            file_size_bytes=10 * 1024 * 1024,
+        )
+
+        assert api_type == TranscriptionAPI.BATCH
+        assert "duration unavailable" in reason.lower()
+
+    def test_routes_to_fast_when_size_and_duration_are_known_safe(self, service: FastTranscriptionService):
+        api_type, reason = service.determine_api(
+            "https://test.blob.core.windows.net/recordings/audio.wav",
+            file_size_bytes=10 * 1024 * 1024,
+            audio_duration_minutes=15,
+        )
+
+        assert api_type == TranscriptionAPI.FAST
+        assert "eligible" in reason.lower()
+
+
+class TestServiceProvider:
+    def test_passes_authenticated_storage_credential_to_transcription_service(self):
+        from services import service_providers
+
+        config = Mock()
+        storage_service = Mock()
+        storage_service.credential = Mock()
+        transcription_service = Mock()
+        service_providers.clear_service_cache()
+
+        with patch.object(service_providers, "get_config", return_value=config), patch.object(
+            service_providers,
+            "get_blob_storage_service",
+            return_value=storage_service,
+        ), patch.object(
+            service_providers,
+            "FastTranscriptionService",
+            return_value=transcription_service,
+        ) as service_class:
+            result = service_providers.get_transcription_service()
+
+        assert result is transcription_service
+        service_class.assert_called_once_with(
+            config=config,
+            storage_service=storage_service,
+            storage_credential=storage_service.credential,
+        )
+        service_providers.clear_service_cache()
+
+
+class TestSubmissionAndStatus:
+    def test_headers_use_speech_key_when_configured(self, mock_config: Mock):
+        mock_config.speech_key = "test-speech-key"
+        service = FastTranscriptionService(config=mock_config)
+
+        headers = service._get_headers(TranscriptionAPI.FAST)
+
+        assert headers == {"Ocp-Apim-Subscription-Key": "test-speech-key"}
+
+    def test_submit_fast_transcription_success(self, service: FastTranscriptionService):
+        service._download_audio_from_blob = Mock(return_value=b"fake-audio")
+        service.session.request = Mock(
+            return_value=_mock_response(
+                200,
+                {
+                    "phrases": [
+                        {
+                            "text": "Hello world",
+                            "speaker": 1,
+                            "offsetMilliseconds": 0,
+                            "confidence": 0.95,
+                        }
+                    ]
+                },
+            )
+        )
+
+        transcription_id = service._submit_fast_transcription(
+            "https://test.blob.core.windows.net/recordings/audio.wav"
+        )
+
+        assert transcription_id.startswith("fast_")
+        request_call = service.session.request.call_args
+        assert request_call.kwargs["method"] == "POST"
+        assert "api-version=2025-10-15" in request_call.kwargs["url"]
+
+    def test_submit_batch_transcription_success(self, service: FastTranscriptionService):
+        service.session.request = Mock(
+            return_value=_mock_response(
+                201,
+                {
+                    "self": "https://uksouth.cognitiveservices.azure.com/speechtotext/v3.2/transcriptions/abc123"
+                },
+            )
+        )
+
+        transcription_id = service._submit_batch_transcription(
+            "https://test.blob.core.windows.net/recordings/audio.wav"
+        )
+
+        assert transcription_id == "abc123"
+        payload = service.session.request.call_args.kwargs["json"]
+        assert payload["locale"] == "en-GB"
+        assert payload["properties"]["diarizationEnabled"] is True
+
+    def test_submit_batch_transcription_uses_storage_sas_url(
+        self,
+        mock_config: Mock,
+        mock_credential: Mock,
+    ):
+        storage_service = Mock()
+        storage_service.generate_sas_url.return_value = (
+            "https://test.blob.core.windows.net/recordings/audio.wav?sig=signed"
+        )
+        service = FastTranscriptionService(
+            config=mock_config,
+            credential=mock_credential,
+            storage_service=storage_service,
+        )
+        service.session.request = Mock(
+            return_value=_mock_response(
+                201,
+                {
+                    "self": "https://uksouth.cognitiveservices.azure.com/speechtotext/v3.2/transcriptions/abc123"
+                },
+            )
+        )
+
+        service._submit_batch_transcription(
+            "https://test.blob.core.windows.net/recordings/audio.wav"
+        )
+
+        payload = service.session.request.call_args.kwargs["json"]
+        assert payload["contentUrls"] == [
+            "https://test.blob.core.windows.net/recordings/audio.wav?sig=signed"
+        ]
+        storage_service.generate_sas_url.assert_called_once_with(
+            "https://test.blob.core.windows.net/recordings/audio.wav"
+        )
+
+    def test_check_status_returns_cached_fast_result(self, service: FastTranscriptionService):
+        cached_result = {"phrases": [{"text": "Test", "speaker": 1}]}
+        service._cache_fast_result("fast_12345", cached_result)
+
+        status_data = service.check_status("fast_12345")
+
+        assert status_data["status"] == "Succeeded"
+        assert status_data["result"] == cached_result
+        assert "fast_12345" not in service._fast_results_cache
+
+    def test_check_status_raises_for_failed_batch_job(self, service: FastTranscriptionService):
+        service.session.request = Mock(
+            return_value=_mock_response(
+                200,
+                {"status": "Failed", "error": {"message": "Audio format not supported"}},
+            )
+        )
+
+        with pytest.raises(TranscriptionServiceError, match="Transcription failed"):
+            service.check_status("batch_12345", timeout=1, interval=0)
+
+    def test_check_status_logs_batch_progress(self, monkeypatch, service: FastTranscriptionService):
+        service.session.request = Mock(
+            side_effect=[
+                _mock_response(200, {"status": "Running"}),
+                _mock_response(200, {"status": "Succeeded"}),
+            ]
+        )
+        service.logger = Mock()
+        times = iter([0, 0, 5])
+        monkeypatch.setattr("services.fast_transcription_service.time.time", lambda: next(times))
+        monkeypatch.setattr("services.fast_transcription_service.time.sleep", lambda _interval: None)
+
+        result = service.check_status("batch_12345", timeout=30, interval=0)
+
+        assert result["status"] == "Succeeded"
+        service.logger.info.assert_any_call(
+            "transcription_batch_status",
+            transcription_id="batch_12345",
+            status="running",
+            elapsed_seconds=0,
+        )
+
+
+class TestResults:
+    def test_get_results_prefers_transcription_artifact(self, service: FastTranscriptionService):
+        files_response = _mock_response(
+            200,
+            {
+                "values": [
+                    {
+                        "kind": "TranscriptionReport",
+                        "name": "report.json",
+                        "links": {"contentUrl": "https://example.com/report.json"},
+                    },
+                    {
+                        "kind": "Transcription",
+                        "name": "transcription.json",
+                        "links": {"contentUrl": "https://example.com/transcription.json"},
+                    },
+                ]
+            },
+        )
+        transcript_response = _mock_response(
+            200,
+            {
+                "combinedRecognizedPhrases": [
+                    {"display": "Hello, this is the transcript."}
+                ]
+            },
+        )
+        service.session.request = Mock(side_effect=[files_response, transcript_response])
+
+        result = service.get_results({"links": {"files": "https://example.com/files"}})
+
+        assert result == "Hello, this is the transcript."
+        requested_urls = [call.kwargs["url"] for call in service.session.request.call_args_list]
+        assert "https://example.com/report.json" not in requested_urls
+        assert "https://example.com/transcription.json" in requested_urls
+
+    def test_format_batch_transcription_falls_back_to_combined_text(self, service: FastTranscriptionService):
+        result = service._format_batch_transcription(
+            {
+                "recognizedPhrases": [{"nBest": [{"confidence": 0.92}]}],
+                "combinedRecognizedPhrases": [
+                    {"display": "Fallback transcript text"}
+                ],
+            }
+        )
+
+        assert result == "Fallback transcript text"
+
+    def test_format_fast_transcription_falls_back_to_combined_text(self, service: FastTranscriptionService):
+        result = service._format_fast_transcription(
+            {
+                "phrases": [{"speaker": 1, "confidence": 0.95}],
+                "combinedPhrases": [{"text": "Fallback fast transcript"}],
+            }
+        )
+
+        assert result == "Fallback fast transcript"
+
+    def test_get_results_raises_when_batch_transcript_is_empty(self, service: FastTranscriptionService):
+        files_response = _mock_response(
+            200,
+            {
+                "values": [
+                    {
+                        "kind": "Transcription",
+                        "name": "transcription.json",
+                        "links": {"contentUrl": "https://example.com/transcription.json"},
+                    }
+                ]
+            },
+        )
+        empty_transcript_response = _mock_response(
+            200,
+            {"recognizedPhrases": [], "combinedRecognizedPhrases": []},
+        )
+        service.session.request = Mock(
+            side_effect=[files_response, empty_transcript_response]
+        )
+
+        with pytest.raises(TranscriptionServiceError, match="without any recognized text"):
+            service.get_results({"links": {"files": "https://example.com/files"}})
+
+
+class TestFallbackBehavior:
+    @patch("services.fast_transcription_service.time.sleep")
+    def test_fast_submission_honours_retry_after_before_succeeding(
+        self,
+        mock_sleep: Mock,
+        service: FastTranscriptionService,
+    ):
+        rate_limited = _mock_response(429, {"error": {"message": "Resource Exhausted"}})
+        rate_limited.headers = {"Retry-After": "7"}
+        succeeded = _mock_response(
+            200,
+            {"phrases": [{"text": "Recovered after throttling"}]},
+        )
+        service._download_audio_from_blob = Mock(return_value=b"fake-audio")
+        service.session.request = Mock(side_effect=[rate_limited, succeeded])
+
+        transcription_id = service.submit_transcription_job(
+            "https://test.blob.core.windows.net/recordings/audio.wav",
+            file_size_bytes=10 * 1024 * 1024,
+            audio_duration_minutes=10,
+        )
+
+        assert transcription_id.startswith("fast_")
+        assert service.session.request.call_count == 2
+        mock_sleep.assert_called_once_with(7.0)
+
+    @patch("services.fast_transcription_service.time.sleep")
+    def test_fast_submission_falls_back_to_batch_after_bounded_429_retries(
+        self,
+        mock_sleep: Mock,
+        service: FastTranscriptionService,
+    ):
+        rate_limited = _mock_response(429, {"error": {"message": "Resource Exhausted"}})
+        service._download_audio_from_blob = Mock(return_value=b"fake-audio")
+        service._submit_batch_transcription = Mock(return_value="batch789")
+        service.session.request = Mock(return_value=rate_limited)
+
+        transcription_id = service.submit_transcription_job(
+            "https://test.blob.core.windows.net/recordings/audio.wav",
+            file_size_bytes=10 * 1024 * 1024,
+            audio_duration_minutes=10,
+        )
+
+        assert transcription_id == "batch789"
+        assert service.session.request.call_count == 3
+        assert mock_sleep.call_count == 2
+        service._submit_batch_transcription.assert_called_once()
+
+    def test_submit_transcription_job_falls_back_to_batch_on_fast_limit_error(
+        self,
+        service: FastTranscriptionService,
+    ):
+        service._submit_fast_transcription = Mock(
+            side_effect=TranscriptionServiceError("Audio duration too long")
+        )
+        service._submit_batch_transcription = Mock(return_value="batch789")
+
+        transcription_id = service.submit_transcription_job(
+            "https://test.blob.core.windows.net/recordings/audio.wav",
+            file_size_bytes=10 * 1024 * 1024,
+            audio_duration_minutes=10,
+        )
+
+        assert transcription_id == "batch789"
+
+    def test_submit_transcription_job_falls_back_to_batch_when_fast_result_is_empty(
+        self,
+        service: FastTranscriptionService,
+    ):
+        service._download_audio_from_blob = Mock(return_value=b"fake-audio")
+        service._submit_batch_transcription = Mock(return_value="batch789")
+        service.session.request = Mock(return_value=_mock_response(200, {"phrases": []}))
+
+        transcription_id = service.submit_transcription_job(
+            "https://test.blob.core.windows.net/recordings/audio.wav",
+            file_size_bytes=10 * 1024 * 1024,
+            audio_duration_minutes=10,
+        )
+
+        assert transcription_id == "batch789"
+
+
+class TestHelpers:
+    def test_audio_download_failure(self, service: FastTranscriptionService):
+        service._parse_blob_url = Mock(side_effect=RuntimeError("boom"))
+
+        with pytest.raises(TranscriptionServiceError, match="Failed to download audio"):
+            service._download_audio_from_blob(
+                "https://test.blob.core.windows.net/recordings/audio.wav"
+            )
+
+    def test_timestamp_conversion_ticks(self, service: FastTranscriptionService):
+        assert service._ticks_to_timestamp(50_000_000) == "00:00:05.000"
+
+    def test_batch_timestamp_treats_large_numeric_offset_as_ticks(
+        self,
+        service: FastTranscriptionService,
+    ):
+        formatted = service._format_batch_transcription(
+            {
+                "recognizedPhrases": [
+                    {
+                        "speaker": "Speaker 1",
+                        "offset": 3_000_000_000,
+                        "nBest": [{"display": "Hello world", "confidence": 0.95}],
+                    }
+                ]
+            }
+        )
+
+        assert "[00:00:03.000] Hello world" in formatted

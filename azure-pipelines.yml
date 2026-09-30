@@ -1,0 +1,271 @@
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+      - staging
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+  pythonVersion: '3.11'
+  nodeVersion: '22.x'
+  pipCacheDir: '$(Pipeline.Workspace)/.pip'
+  pnpmStoreDir: '$(Pipeline.Workspace)/.pnpm-store'
+  frontendWorkingDir: 'frontend_app'
+
+stages:
+  - stage: Build
+    displayName: Build, test, and publish immutable artifacts
+    jobs:
+      - job: Backend
+        displayName: Backend API
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(pythonVersion)
+
+          - script: mkdir -p "$(pipCacheDir)"
+            displayName: Prepare pip cache
+
+          - task: Cache@2
+            displayName: Cache pip packages
+            inputs:
+              key: 'pip | "$(Agent.OS)" | "$(pythonVersion)" | backend_app/requirements.txt | backend_app/requirements-test.txt'
+              restoreKeys: |
+                pip | "$(Agent.OS)" | "$(pythonVersion)"
+              path: $(pipCacheDir)
+
+          - script: |
+              set -euo pipefail
+              sudo apt-get update
+              sudo apt-get install -y libmagic1
+            displayName: Install system dependencies
+
+          - script: |
+              set -euo pipefail
+              cd backend_app
+              python -m pip install --upgrade pip
+              pip install -r requirements.txt -r requirements-test.txt
+              python -m pytest tests --junitxml=test-results.xml --cov=app --cov-report=xml
+            displayName: Test backend
+            env:
+              PIP_CACHE_DIR: $(pipCacheDir)
+              PYTHONPATH: $(Build.SourcesDirectory)
+              JWT_SECRET_KEY: test-secret-key-for-ci
+              AZURE_STORAGE_ACCOUNT_URL: https://fakeaccount.blob.core.windows.net
+              AZURE_OPENAI_ENDPOINT: https://test-openai.openai.azure.com
+
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: backend_app/test-results.xml
+              testRunTitle: Backend Tests
+
+          - task: PublishCodeCoverageResults@2
+            condition: succeededOrFailed()
+            inputs:
+              summaryFileLocation: backend_app/coverage.xml
+
+          - task: CopyFiles@2
+            displayName: Stage backend
+            inputs:
+              SourceFolder: backend_app
+              Contents: |
+                app/**
+                requirements.txt
+              TargetFolder: $(Build.ArtifactStagingDirectory)/backend
+
+          - script: |
+              set -euo pipefail
+              python -m pip install --upgrade pip
+              python -m pip install -r backend_app/requirements.txt --target "$(Build.ArtifactStagingDirectory)/backend/.python_packages/lib/site-packages" --platform manylinux2014_x86_64 --only-binary=:all: --python-version 311 --implementation cp
+            displayName: Vendor backend dependencies
+            env:
+              PIP_CACHE_DIR: $(pipCacheDir)
+
+          - script: python -S -c "import gunicorn, uvicorn, app.main"
+            workingDirectory: $(Build.ArtifactStagingDirectory)/backend
+            displayName: Verify packaged backend imports
+            env:
+              PYTHONPATH: $(Build.ArtifactStagingDirectory)/backend/.python_packages/lib/site-packages
+              JWT_SECRET_KEY: test-secret-key-for-ci
+              AZURE_STORAGE_ACCOUNT_URL: https://fakeaccount.blob.core.windows.net
+              AZURE_OPENAI_ENDPOINT: https://test-openai.openai.azure.com
+
+          - task: ArchiveFiles@2
+            displayName: Zip backend
+            inputs:
+              rootFolderOrFile: $(Build.ArtifactStagingDirectory)/backend
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: $(Build.ArtifactStagingDirectory)/backend.zip
+              replaceExistingArchive: true
+
+          - publish: $(Build.ArtifactStagingDirectory)/backend.zip
+            artifact: backend
+            displayName: Publish backend package
+
+      - job: Functions
+        displayName: Azure Functions
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - script: mkdir -p "$(pipCacheDir)"
+            displayName: Prepare Function pip cache
+
+          - task: Cache@2
+            displayName: Cache Function pip packages
+            inputs:
+              key: 'pip | "$(Agent.OS)" | "$(pythonVersion)" | az-func-audio/requirements.txt'
+              restoreKeys: |
+                pip | "$(Agent.OS)" | "$(pythonVersion)"
+              path: $(pipCacheDir)
+
+
+          - task: UsePythonVersion@0
+            inputs:
+              versionSpec: $(pythonVersion)
+
+          - script: |
+              set -euo pipefail
+              python -m pip install -r requirements.txt -r requirements-test.txt
+              python -m pytest tests --junitxml=test-results.xml
+            workingDirectory: az-func-audio
+            displayName: Test functions
+            env:
+              PIP_CACHE_DIR: $(pipCacheDir)
+
+          - task: PublishTestResults@2
+            condition: succeededOrFailed()
+            inputs:
+              testResultsFiles: az-func-audio/test-results.xml
+              testRunTitle: Function Tests
+
+          - task: CopyFiles@2
+            displayName: Stage functions
+            inputs:
+              SourceFolder: az-func-audio
+              Contents: |
+                **
+                !local.settings.json
+                !raw_transcription_response.json
+                !tests/**
+                !test-results.xml
+                !requirements-test.txt
+                !pytest.ini
+                !.pytest_cache/**
+                !**/__pycache__/**
+                !**/*.pyc
+              TargetFolder: $(Build.ArtifactStagingDirectory)/functions
+
+          - script: |
+              set -euo pipefail
+              python -m pip install --upgrade pip
+              python -m pip install -r az-func-audio/requirements.txt \
+                --target "$(Build.ArtifactStagingDirectory)/functions/.python_packages/lib/site-packages" \
+                --platform manylinux2014_x86_64 \
+                --only-binary=:all: \
+                --python-version 311 \
+                --implementation cp
+            displayName: Vendor Function dependencies
+            env:
+              PIP_CACHE_DIR: $(pipCacheDir)
+
+          - script: python -S -c "import function_app"
+            workingDirectory: $(Build.ArtifactStagingDirectory)/functions
+            displayName: Verify packaged Function imports
+            env:
+              PYTHONPATH: $(Build.ArtifactStagingDirectory)/functions/.python_packages/lib/site-packages
+
+          - task: ArchiveFiles@2
+            displayName: Zip functions
+            inputs:
+              rootFolderOrFile: $(Build.ArtifactStagingDirectory)/functions
+              includeRootFolder: false
+              archiveType: zip
+              archiveFile: $(Build.ArtifactStagingDirectory)/functions.zip
+              replaceExistingArchive: true
+
+          - publish: $(Build.ArtifactStagingDirectory)/functions.zip
+            artifact: functions
+            displayName: Publish functions package
+
+      - job: Frontend
+        displayName: Frontend
+        steps:
+          - checkout: self
+            fetchDepth: 1
+
+          - task: UseNode@1
+            inputs:
+              version: $(nodeVersion)
+
+          - script: |
+              set -euo pipefail
+              npm install --global corepack@latest
+              corepack enable
+              corepack prepare "$(node -p 'require("./$(frontendWorkingDir)/package.json").packageManager')" --activate
+              pnpm --version
+            displayName: Activate repo pnpm
+
+          - script: mkdir -p "$(pnpmStoreDir)"
+            displayName: Prepare pnpm cache
+
+          - task: Cache@2
+            displayName: Cache pnpm store
+            inputs:
+              key: 'pnpm | "$(Agent.OS)" | "$(nodeVersion)" | $(frontendWorkingDir)/pnpm-lock.yaml'
+              restoreKeys: |
+                pnpm | "$(Agent.OS)" | "$(nodeVersion)"
+                pnpm | "$(Agent.OS)"
+              path: $(pnpmStoreDir)
+
+          - script: |
+              set -euo pipefail
+              pnpm config set store-dir "$(pnpmStoreDir)"
+              pnpm install --frozen-lockfile
+            workingDirectory: $(frontendWorkingDir)
+            displayName: Install frontend dependencies
+            env:
+              CI: true
+
+          - script: pnpm run type-check
+            workingDirectory: $(frontendWorkingDir)
+            displayName: Type-check frontend
+
+          - script: pnpm run lint
+            workingDirectory: $(frontendWorkingDir)
+            displayName: Lint frontend
+
+          - script: pnpm run test
+            workingDirectory: $(frontendWorkingDir)
+            displayName: Test frontend
+            env:
+              CI: true
+
+          - script: |
+              set -euo pipefail
+              cd "$(frontendWorkingDir)"
+              rm -rf dist
+              pnpm run build
+              test -f dist/index.html
+              cp staticwebapp.config.json dist/
+            displayName: Build frontend
+            env:
+              CI: 'true'
+              VITE_API_URL: /api
+              VITE_DEVELOPMENT: 'false'
+              VITE_BACKEND_DIRECT_URL: ''
+              VITE_CLIENT_ID: ''
+              VITE_TENANT_ID: ''
+              VITE_ENTRA_API_SCOPE: ''
+
+          - publish: $(frontendWorkingDir)/dist
+            artifact: frontend
+            displayName: Publish frontend package

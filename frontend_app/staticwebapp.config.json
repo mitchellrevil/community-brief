@@ -1,0 +1,15 @@
+{
+  "routes": [
+    {
+      "route": "/auth-config.js",
+      "headers": { "Cache-Control": "no-store" }
+    }
+  ],
+  "globalHeaders": {
+    "Content-Security-Policy": "base-uri 'self'; object-src 'none'; script-src 'self' 'wasm-unsafe-eval'"
+  },
+  "navigationFallback": {
+    "rewrite": "/index.html",
+    "exclude": ["/assets/*", "/images/*", "/favicon.ico", "/auth-config.js", "/auth-redirect.html"]
+  }
+}

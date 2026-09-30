@@ -1,0 +1,15 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "python",
+    "AZURE_STORAGE_RECORDINGS_CONTAINER": "recordingscontainer",
+    "AZURE_COSMOS_ENDPOINT": "https://<your-cosmos>.documents.azure.com:443/",
+    "AZURE_COSMOS_DB": "VoiceDB",
+    "AZURE_COSMOS_DB_PREFIX": "voice_",
+    "AZURE_OPENAI_ENDPOINT": "https://<your-ai-account>.openai.azure.com/",
+    "AZURE_OPENAI_DEPLOYMENT": "<deployment-name>",
+    "AZURE_OPENAI_DEPLOYMENT_NAME": "<deployment-name>",
+    "AZURE_OPENAI_API_VERSION": "2024-12-01-preview"
+  }
+}
