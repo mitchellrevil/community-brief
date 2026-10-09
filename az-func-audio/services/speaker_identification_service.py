@@ -83,6 +83,17 @@ class SpeakerIdentificationService:
             )
             return transcript, {"applied": False, "reason": "no_speaker_headers"}
 
+        # Preserve names already supplied by Teams or edited by the user.
+        named_ids = {
+            match.group("speaker_id")
+            for line in transcript.splitlines()
+            if (match := SPEAKER_HEADER_RE.match(line)) and match.group("label")
+            and match.group("label").strip() != f"Participant {match.group('speaker_id')}"
+        }
+        speaker_ids = [speaker_id for speaker_id in speaker_ids if speaker_id not in named_ids]
+        if not speaker_ids:
+            return transcript, {"applied": False, "reason": "labels_already_provided"}
+
         response_text = self._call_model(
             transcript_excerpt=build_transcript_excerpt(transcript),
             speaker_ids=speaker_ids,
@@ -238,6 +249,8 @@ def labels_from_speaker_map(
 ) -> Dict[str, str]:
     labels: Dict[str, str] = {}
     for speaker_id, raw_value in speaker_map.items():
+        if speaker_ids is not None and speaker_id not in speaker_ids:
+            continue
         if not isinstance(raw_value, dict):
             continue
         confidence = _parse_confidence(raw_value.get("confidence"))

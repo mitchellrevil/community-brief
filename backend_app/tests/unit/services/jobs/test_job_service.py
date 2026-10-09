@@ -44,6 +44,51 @@ async def clear_job_caches():
     await _job_cache.clear()
     await _jobs_cache.clear()
 
+
+@pytest.mark.asyncio
+async def test_teams_summaries_are_owner_scoped_and_do_not_read_or_sign_job_content(job_service, mock_job_repository, mock_storage):
+    mock_job_repository.query.return_value = [{"id": "job-1", "teams_event_id": "event-1", "status": "completed"}]
+    result = await job_service.get_teams_import_summaries({"id": "owner-1"})
+    query, params = mock_job_repository.query.call_args.args
+    assert "c.user_id = @user_id" in query
+    assert "c.deleted = false" in query
+    assert {"name": "@user_id", "value": "owner-1"} in params
+    assert "file_path" not in query
+    assert result[0]["teams_event_id"] == "event-1"
+    mock_storage.add_sas_token_to_url.assert_not_called()
+    mock_storage.download_text_from_blob.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("status_filter", "statuses"), [
+    ("processing", ["processing", "pending", "transcribing", "transcribed", "analysing"]),
+    ("failed", ["failed", "error"]),
+])
+async def test_list_status_groups_apply_to_both_jobs_and_count(job_service, mock_job_repository, status_filter, statuses):
+    mock_job_repository.query.side_effect = [[], [0]]
+    result = await job_service.get_jobs_with_filters(current_user={"id": "owner-1"}, status=status_filter)
+    assert result == {"jobs": [], "count": 0}
+    for call in mock_job_repository.query.call_args_list:
+        query, params = call.args
+        assert "c.status IN (" in query
+        assert [param["value"] for param in params if param["name"].startswith("@status_")] == statuses
+        assert {"name": "@user_id", "value": "owner-1"} in params
+
+
+def test_job_serialization_retains_teams_source_and_transcript_revision():
+    from app.models.job import Job
+
+    source = {"kind": "teams", "event_id": "calendar-event-1"}
+    job = Job.from_dict({
+        "id": "job-1", "user_id": "owner-1", "displayname": "Review", "file_name": "review.vtt", "file_path": "https://storage/review.vtt",
+        "source": source, "teams_event_id": "calendar-event-1", "transcription_revision": "2026-09-10T10:00:00Z",
+        "speaker_identification": {"applied": False, "reason": "no_speaker_headers"},
+    })
+    saved = job.to_dict()
+    assert saved["source"] == source
+    assert saved["transcription_revision"] == "2026-09-10T10:00:00Z"
+    assert saved["speaker_identification"]["reason"] == "no_speaker_headers"
+
 @pytest.mark.asyncio
 class TestJobServiceGet:
     async def test_get_job_cache_miss(self, job_service, mock_job_repository):

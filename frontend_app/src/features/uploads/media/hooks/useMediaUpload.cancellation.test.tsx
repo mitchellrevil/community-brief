@@ -1,18 +1,23 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+
 import { useMediaUpload } from "./useMediaUpload";
-import { createQueryClient, createQueryClientWrapper } from "@/tests/test-utils";
+import {
+  createQueryClient,
+  createQueryClientWrapper,
+} from "@/tests/test-utils";
 
 const uploadFile = vi.hoisted(() => vi.fn());
 const convertToWavWithFFmpeg = vi.hoisted(() => vi.fn());
 
-vi.mock('@/lib/ffmpegConvert', () => ({ convertToWavWithFFmpeg }));
-vi.mock('@/lib/online-status', () => ({ isOnlineSync: () => true }));
+vi.mock("@/lib/ffmpegConvert", () => ({ convertToWavWithFFmpeg }));
+vi.mock("@/lib/online-status", () => ({ isOnlineSync: () => true }));
 
 vi.mock("@/features/recordings/data/api", () => ({
   uploadFile,
   isUploadCancelledError: (error: unknown, signal?: AbortSignal) =>
-    signal?.aborted || (error instanceof DOMException && error.name === "AbortError"),
+    signal?.aborted ||
+    (error instanceof DOMException && error.name === "AbortError"),
 }));
 
 describe("useMediaUpload cancellation", () => {
@@ -21,41 +26,58 @@ describe("useMediaUpload cancellation", () => {
     convertToWavWithFFmpeg.mockReset();
   });
 
-  it('uploads a Teams VTT unchanged even after an audio file was selected', async () => {
-    uploadFile.mockResolvedValue({ job_id: 'job-1' });
+  it("uploads a Teams VTT unchanged even after an audio file was selected", async () => {
+    uploadFile.mockResolvedValue({ job_id: "job-1" });
     const wrapper = createQueryClientWrapper(createQueryClient());
-    const { result } = renderHook(() => useMediaUpload(), { wrapper });
-    const vtt = new File(['WEBVTT\n\n'], 'teams-meeting.vtt', { type: 'text/vtt' });
+    const { result } = renderHook(
+      () => useMediaUpload({ teamsEventId: "teams-event-1" }),
+      { wrapper },
+    );
+    const vtt = new File(["WEBVTT\n\n"], "teams-meeting.vtt", {
+      type: "text/vtt",
+    });
 
-    act(() => result.current.handleFileSelect(
-      new File(['audio'], 'recording.wav', { type: 'audio/wav' }),
-    ));
+    act(() =>
+      result.current.handleFileSelect(
+        new File(["audio"], "recording.wav", { type: "audio/wav" }),
+      ),
+    );
     await act(async () => {
       await result.current.onSubmit({
         mediaFile: vtt,
-        promptCategory: 'category-1',
-        promptSubcategory: 'subcategory-1',
+        promptCategory: "category-1",
+        promptSubcategory: "subcategory-1",
       });
     });
 
     expect(convertToWavWithFFmpeg).not.toHaveBeenCalled();
     const uploadedFile = uploadFile.mock.calls[0][0] as File;
-    expect(uploadedFile.name).toBe('teams-meeting.vtt');
-    expect(uploadedFile.type).toBe('text/vtt');
-    expect(await uploadedFile.text()).toBe('WEBVTT\n\n');
+    expect(uploadedFile.name).toBe("teams-meeting.vtt");
+    expect(uploadedFile.type).toBe("text/vtt");
+    expect(uploadFile.mock.calls[0][5]).toMatchObject({
+      teams_event_id: "teams-event-1",
+    });
+    expect(await uploadedFile.text()).toBe("WEBVTT\n\n");
   });
 
   it("stops the active upload without setting success or invalidating recordings", async () => {
-    uploadFile.mockImplementation((...args: Array<unknown>) => new Promise((_resolve, reject) => {
-      const signal = args[6] as AbortSignal;
-      signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")));
-    }));
+    uploadFile.mockImplementation(
+      (...args: Array<unknown>) =>
+        new Promise((_resolve, reject) => {
+          const signal = args[6] as AbortSignal;
+          signal.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
     const queryClient = createQueryClient();
     const invalidateQueries = vi.spyOn(queryClient, "invalidateQueries");
     const wrapper = createQueryClientWrapper(queryClient);
     const { result } = renderHook(() => useMediaUpload(), { wrapper });
 
-    const file = new File(["meeting notes"], "meeting.txt", { type: "text/plain" });
+    const file = new File(["meeting notes"], "meeting.txt", {
+      type: "text/plain",
+    });
     act(() => {
       void result.current.onSubmit({
         mediaFile: file,

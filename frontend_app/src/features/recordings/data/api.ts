@@ -16,6 +16,7 @@ import type {
   ReprocessRequest,
   ReprocessResponse,
   SharedJobsResponse,
+  TeamsJobSource,
   UploadResponse,
 } from "@/types/api";
 import { 
@@ -42,6 +43,26 @@ export class UploadCancelledError extends Error {
     super("Upload cancelled");
     this.name = "UploadCancelledError";
   }
+}
+
+export interface TeamsImportJob {
+  source?: TeamsJobSource;
+  id: string;
+  teams_event_id?: string;
+  file_name?: string;
+  displayname?: string;
+  display_name?: string;
+  filename?: string;
+  status: string;
+  created_at: string;
+  updated_at?: string;
+  file_path?: string;
+  audio_duration_seconds?: number;
+}
+
+export async function getTeamsImportJobs(): Promise<Array<TeamsImportJob>> {
+  const response = await httpClient.get(`${JOBS_API}/teams-imports`);
+  return response.data;
 }
 
 export function isUploadCancelledError(error: unknown, signal?: AbortSignal): boolean {
@@ -541,6 +562,9 @@ async function uploadFileDirect(
     completePayload.recording_consent = uploadMetadata.recording_consent;
   }
 
+  if (uploadMetadata?.teams_event_id) {
+    completePayload.teams_event_id = uploadMetadata.teams_event_id;
+  }
   const completeResponse = await httpClient.post(UPLOAD_COMPLETE_API, completePayload, { signal });
   throwIfUploadCancelled(signal);
 
@@ -573,6 +597,9 @@ async function uploadFileMultipart(
   }
   if (uploadMetadata?.recording_consent) {
     formData.append("recording_consent", JSON.stringify(uploadMetadata.recording_consent));
+  }
+  if (uploadMetadata?.teams_event_id) {
+    formData.append("teams_event_id", uploadMetadata.teams_event_id);
   }
 
   try {

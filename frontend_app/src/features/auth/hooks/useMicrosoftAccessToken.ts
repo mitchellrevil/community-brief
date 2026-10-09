@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   InteractionRequiredAuthError,
   InteractionStatus,
@@ -6,12 +6,16 @@ import {
 import { useMsal } from "@azure/msal-react";
 
 import { microsoftGraphScopes } from "../config/msal";
+import { acquireGraphToken } from "../lib/graph-token";
 import { useAuthSession } from "./useAuthSession";
+import type { GraphTokenProvider } from "@/shared/api/graph-client";
+import { MicrosoftGraphError } from "@/shared/api/graph-client";
 
 export interface MicrosoftGraphTokenState {
   accessToken: string | null;
   isLoading: boolean;
   error: unknown;
+  getAccessToken: GraphTokenProvider;
 }
 
 export function useMicrosoftGraphToken(
@@ -20,7 +24,9 @@ export function useMicrosoftGraphToken(
 ): MicrosoftGraphTokenState {
   const { instance, accounts, inProgress } = useMsal();
   const { isAuthenticated, isLoading: isAuthLoading } = useAuthSession();
-  const [state, setState] = useState<MicrosoftGraphTokenState>({
+  const [state, setState] = useState<
+    Omit<MicrosoftGraphTokenState, "getAccessToken">
+  >({
     accessToken: null,
     isLoading: true,
     error: null,
@@ -54,15 +60,11 @@ export function useMicrosoftGraphToken(
     let isCancelled = false;
     setState({ accessToken: null, isLoading: true, error: null });
 
-    void instance
-      .acquireTokenSilent({
-        scopes,
-        account,
-      })
-      .then((response) => {
+    void acquireGraphToken(instance, account, scopes)
+      .then((accessToken) => {
         if (!isCancelled) {
           setState({
-            accessToken: response.accessToken || null,
+            accessToken,
             isLoading: false,
             error: null,
           });
@@ -94,7 +96,38 @@ export function useMicrosoftGraphToken(
     enabled,
   ]);
 
-  return state;
+  const getAccessToken = useCallback<GraphTokenProvider>(
+    async (options) => {
+      const account = instance.getActiveAccount() ?? accounts.at(0);
+      if (!enabled || !isAuthenticated || !account) {
+        throw new MicrosoftGraphError(
+          "Sign in with your Microsoft work account to reconnect Teams.",
+          "GraphAuthenticationFailed",
+          401,
+        );
+      }
+      try {
+        return await acquireGraphToken(
+          instance,
+          account,
+          scopes,
+          options?.forceRefresh,
+        );
+      } catch (error) {
+        if (error instanceof InteractionRequiredAuthError) {
+          throw new MicrosoftGraphError(
+            "Sign in with Microsoft again to grant Teams access.",
+            "GraphAuthenticationFailed",
+            401,
+          );
+        }
+        throw error;
+      }
+    },
+    [accounts, enabled, instance, isAuthenticated, scopes],
+  );
+
+  return { ...state, getAccessToken };
 }
 
 export function useMicrosoftAccessToken() {

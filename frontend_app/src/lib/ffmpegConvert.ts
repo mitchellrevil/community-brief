@@ -1,8 +1,10 @@
 import { toast } from "sonner";
 import { getFFmpeg } from "./audio-compression";
+import { getAudioFileExtension, normalizeAudioFilename } from "./audio-format";
 
 export interface AudioFfmpegMetadata {
   durationSeconds?: number;
+  convertedToWav?: boolean;
 }
 
 export interface FFmpegConvertOptions {
@@ -13,10 +15,7 @@ export interface FFmpegConvertOptions {
 }
 
 function fileExtension(file: Blob): string {
-  if (file.type.includes("mp4")) return "m4a";
-  if (file.type.includes("wav")) return "wav";
-  if (file.type.includes("mpeg")) return "mp3";
-  return "webm";
+  return getAudioFileExtension(file.type) ?? "webm";
 }
 
 let mergeOperationId = 0;
@@ -105,9 +104,11 @@ export async function convertToWavWithFFmpeg(
   opts: FFmpegConvertOptions = {}
 ): Promise<File> {
   const { setIsConverting, setConversionProgress, setConversionStep, onMetadata } = opts;
+  file = normalizeAudioFilename(file);
   
   // Skip conversion if file is already WAV
-  if (file.type === "audio/wav" || file.name.toLowerCase().endsWith('.wav')) {
+  const knownExtension = getAudioFileExtension(file.type);
+  if (knownExtension === "wav" || (!knownExtension && file.name.toLowerCase().endsWith('.wav'))) {
     return file;
   }
   
@@ -161,7 +162,7 @@ export async function convertToWavWithFFmpeg(
       ? new Uint8Array(outputData)
       : new TextEncoder().encode(outputData);
     const wavFile = new File([wavBytes], outputName, { type: "audio/wav" });
-    onMetadata?.(meta);
+    onMetadata?.({ ...meta, convertedToWav: true });
     setConversionProgress?.(100);
     setIsConverting?.(false);
     return wavFile;

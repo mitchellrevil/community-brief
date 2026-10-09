@@ -53,3 +53,9 @@ def build_analysis_blob_name(blob_url: str, *, operation_id: str | None = None) 
         suffix = uuid.uuid4().hex[:8]
     new_filename = f"{base}{tag}_reprocess_{timestamp}_{suffix}.md"
     return f"{folder}/{new_filename}" if folder else new_filename
+
+
+def build_reprocess_transcript_blob_name(blob_url: str, *, operation_id: str | None = None) -> str:
+    """An enriched transcript belongs to this reprocess operation, not the source job."""
+    analysis_name = build_analysis_blob_name(blob_url, operation_id=operation_id)
+    return f"{os.path.splitext(analysis_name)[0]}_transcript.txt"

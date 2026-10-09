@@ -28,6 +28,7 @@ import { RecordingAlertBanner } from "./ui/RecordingAlertBanner";
 import { RecordingControls } from "./ui/RecordingControls";
 import { RecordingLevelIndicator } from "./ui/RecordingLevelIndicator";
 import type { DraftRecording } from "@/lib/draft-storage";
+import type { AudioFfmpegMetadata } from "@/lib/ffmpegConvert";
 import type { PromptTemplate } from "@/shared/data/templates";
 import type {
   AudioUploadMetadata,
@@ -67,6 +68,7 @@ import { PromptMetadataDisclaimer } from "@/features/uploads/shared/PromptMetada
 import { useScreenWakeLock } from "@/hooks/useScreenWakeLock";
 import { useAudioAnalyzer } from "@/hooks/useAudioAnalyzer";
 import { compressAudioToMP3, getStorageLimits } from "@/lib/audio-compression";
+import { getAudioFileExtension } from "@/lib/audio-format";
 import {
   checkStorageAndWarn,
   cleanupOldDrafts,
@@ -192,15 +194,7 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const recordingCaptureRef = useRef<RecordingCapture | null>(null);
-  const recordingSettingsRef = useRef<Pick<
-    RecordingSettings,
-    | "capture_mode"
-    | "system_audio_requested"
-    | "system_audio_captured"
-    | "voice_isolation_enabled"
-    | "voice_isolation_applied"
-    | "mix_strategy"
-  > | null>(null);
+  const recordingSettingsRef = useRef<RecordingSettings | null>(null);
   // Retained with drafts/queued uploads so reloads and retries preserve the acceptance event.
   const recordingConsentRef = useRef<RecordingConsentEvidence | undefined>(
     undefined,
@@ -580,6 +574,17 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
     setPreviewCurrentTime(nextTime);
   };
 
+  const rememberJoinedRecordingFormat = () => {
+    // Segment joining writes 16 kHz mono PCM; subsequent WAV conversion is skipped.
+    recordingSettingsRef.current = {
+      ...recordingSettingsRef.current,
+      mime_type: "audio/wav",
+      sample_rate_hz: 16000,
+      channels: 1,
+      codec: "pcm_s16le",
+    };
+  };
+
   const beginRecording = async (continuationBase: Blob | null) => {
     if (isPreparingRecording) return;
     const continuationElapsedMs = continuationBase
@@ -662,6 +667,7 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
               [continuationBase, segment],
               { setConversionProgress, setConversionStep },
             );
+            rememberJoinedRecordingFormat();
           } catch (error) {
             console.error("Failed to join recording segments:", error);
             toast.error(
@@ -818,9 +824,14 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
     if (!existingDraft) return;
     setIsRestoringDraft(true);
     try {
-      const restoredBlob = existingDraft.continuationBlob
-        ? await concatenateAudioSegments([existingDraft.audioBlob, existingDraft.continuationBlob], { setConversionProgress, setConversionStep })
-        : existingDraft.audioBlob;
+      let restoredBlob = existingDraft.audioBlob;
+      if (existingDraft.continuationBlob) {
+        restoredBlob = await concatenateAudioSegments(
+          [existingDraft.audioBlob, existingDraft.continuationBlob],
+          { setConversionProgress, setConversionStep },
+        );
+        rememberJoinedRecordingFormat();
+      }
       const url = URL.createObjectURL(restoredBlob);
       audioBlobRef.current = restoredBlob;
       setAudioURL(url);
@@ -943,6 +954,7 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
             uploadMetadata: buildUploadMetadata(recordingTime, {
               mime_type: compressed.type || blob.type,
               source_mime_type: blob.type,
+              codec: "mp3",
             }),
           });
 
@@ -976,18 +988,18 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
 
       // Online: convert to WAV first, then compress if needed
       const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-      const fileExtension = blob.type.includes("mp4") ? "m4a" : "webm";
+      const fileExtension = getAudioFileExtension(blob.type) ?? "webm";
       const fileName = `recording-${timestamp}.${fileExtension}`;
       const file = new File([blob], fileName, { type: blob.type });
 
       setIsConverting(true);
       setConversionStep("Converting...");
-      let ffmpegDurationSeconds: number | undefined;
+      const conversionMetadata: AudioFfmpegMetadata = {};
       const wavFile = await convertToWavWithFFmpeg(file, {
         setConversionProgress,
         setConversionStep,
         onMetadata: (meta) => {
-          ffmpegDurationSeconds = meta.durationSeconds;
+          Object.assign(conversionMetadata, meta);
         },
       });
       setIsConverting(false);
@@ -996,14 +1008,16 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
       setConvertedBlob(wavFile);
 
       const durationSeconds =
-        ffmpegDurationSeconds ??
+        conversionMetadata.durationSeconds ??
         (recordingTime > 0 ? recordingTime : undefined);
       const wavSettings: RecordingSettings = {
         source_mime_type: file.type || blob.type,
-        mime_type: wavFile.type || "audio/wav",
-        sample_rate_hz: 16000,
-        channels: 1,
-        codec: "pcm_s16le",
+        mime_type: wavFile.type || file.type,
+        ...(conversionMetadata.convertedToWav === true ? {
+          sample_rate_hz: 16000,
+          channels: 1,
+          codec: "pcm_s16le",
+        } : {}),
       };
       const wavUploadMetadata = buildUploadMetadata(
         durationSeconds,
@@ -1226,11 +1240,7 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
   const downloadRecording = async (preferConverted = true) => {
     try {
       if (preferConverted && convertedBlob) {
-        const ext =
-          convertedBlob.type.includes("mpeg") ||
-          convertedBlob.type.includes("mp3")
-            ? "mp3"
-            : "wav";
+        const ext = getAudioFileExtension(convertedBlob.type) ?? "webm";
         const fileName = `recording-${new Date().toISOString()}.${ext}`;
         downloadBlob(convertedBlob, fileName);
         return;
@@ -1238,19 +1248,15 @@ export function RecordingInterface(props: RecordingInterfaceProps) {
 
       if (audioBlobRef.current) {
         const blob = audioBlobRef.current;
-        const ext =
-          blob.type.includes("mp4") || blob.type.includes("m4a")
-            ? "m4a"
-            : blob.type.includes("webm")
-              ? "webm"
-              : "wav";
+        const ext = getAudioFileExtension(blob.type) ?? "webm";
         downloadBlob(blob, `recording-${new Date().toISOString()}.${ext}`);
         return;
       }
 
       if (audioURL) {
         const blob = await fetchAudioBlob(audioURL);
-        downloadBlob(blob, `recording-${new Date().toISOString()}.webm`);
+        const ext = getAudioFileExtension(blob.type) ?? "webm";
+        downloadBlob(blob, `recording-${new Date().toISOString()}.${ext}`);
         return;
       }
 

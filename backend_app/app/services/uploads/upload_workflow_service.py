@@ -14,6 +14,7 @@ from ...core.errors.domain import (
     ResourceNotFoundError,
     ValidationError,
 )
+from ...models.job_source import teams_source_metadata
 from ...core.logging import get_logger
 from ...services.interfaces import AnalyticsServiceInterface
 from ...services.jobs.job_service import JobService
@@ -115,6 +116,7 @@ class UploadWorkflowService:
         audio_duration_minutes: Optional[float],
         recording_settings: Optional[Dict[str, Any]],
         recording_consent: Optional[Dict[str, Any]] = None,
+        teams_event_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         user_id = current_user.get("id")
         safe_filename = self._safe_filename(filename, user_id)
@@ -142,6 +144,7 @@ class UploadWorkflowService:
             recording_consent=recording_consent,
             current_user=current_user,
         )
+        metadata.update(teams_source_metadata(teams_event_id))
 
         try:
             blob_size = await self.storage_service.verify_blob_exists(blob_url)
@@ -183,6 +186,7 @@ class UploadWorkflowService:
         prompt_subcategory_id: Optional[str],
         pre_session_form_data: Optional[str],
         recording_consent: Optional[Dict[str, Any]] = None,
+        teams_event_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         user_id = current_user.get("id")
         await validate_prompt_template_usage(
@@ -211,6 +215,7 @@ class UploadWorkflowService:
                 recording_consent=recording_consent,
                 current_user=current_user,
             )
+            metadata.update(teams_source_metadata(teams_event_id))
 
             created_job = await self.job_service.upload_and_create_job(
                 tmp_path,
@@ -339,6 +344,11 @@ class UploadWorkflowService:
             max_size_mb=MAX_FILE_SIZE_BYTES // (1024 * 1024),
         )
         if not is_valid:
+            logger.warning(
+                "upload_file_validation_rejected",
+                extension=os.path.splitext(tmp_path)[1].lower(),
+                reason=message,
+            )
             raise ValidationError(message, field="filename")
 
     async def _validate_direct_upload_file(

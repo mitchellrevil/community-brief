@@ -108,3 +108,40 @@ def test_blob_processing_does_not_call_speaker_model_when_prompt_flag_is_missing
 
     assert updated == TRANSCRIPT
     analysis_service._get_provider.assert_not_called()
+
+
+def test_existing_names_are_preserved_without_calling_the_model():
+    transcript = TRANSCRIPT.replace("Speaker 1 @", "Speaker 1: Jane Smith @").replace("Speaker 2 @", "Speaker 2: Sam Lee @")
+    analysis_service = Mock()
+    updated, metadata = SpeakerIdentificationService(analysis_service=analysis_service).identify(transcript)
+    assert updated == transcript
+    assert metadata == {"applied": False, "reason": "labels_already_provided"}
+    analysis_service._get_provider.assert_not_called()
+
+
+def test_only_unlabeled_speakers_are_enriched_even_when_the_model_returns_other_names():
+    transcript = TRANSCRIPT.replace("Speaker 1 @", "Speaker 1: Jane Smith @")
+    analysis_service = _analysis_service_with_response('{"speakers":[{"speaker_id":"1","name":"Wrong name","confidence":1},{"speaker_id":"2","name":"Sam Lee","confidence":1}]}')
+    updated, _ = SpeakerIdentificationService(analysis_service=analysis_service).identify(transcript)
+    assert "Speaker 1: Jane Smith @" in updated
+    assert "Speaker 2: Sam Lee @" in updated
+    payload = json.loads(analysis_service._get_provider.return_value.client.responses.create.call_args.kwargs["input"][1]["content"])
+    assert payload["speaker_ids"] == ["2"]
+
+
+def test_unattributed_captions_persist_an_explanation_without_inventing_speakers():
+    analysis_service = Mock()
+    cosmos_service = Mock()
+    storage_service = Mock()
+    service = BlobProcessingService(storage_service_factory=Mock(), transcription_service_factory=Mock(), analysis_service_factory=Mock())
+    updated = service.apply_speaker_identification(
+        formatted_text="Hello everyone.\nWelcome to the review.",
+        file_doc={"id": "job-1", "transcription_file_path": "https://storage/transcript.txt"},
+        prompt_metadata={"speaker_identification_enabled": True}, config=Mock(speaker_identification_model="gpt-test"),
+        cosmos_service=cosmos_service, storage_service=storage_service, analysis_service=analysis_service,
+        job_id="job-1", correlation_id="corr-1",
+    )
+    assert updated == "Hello everyone.\nWelcome to the review."
+    assert cosmos_service.update_job_status.call_args.kwargs["speaker_identification"] == {"applied": False, "reason": "no_speaker_headers"}
+    storage_service.upload_text_to_blob.assert_not_called()
+    analysis_service._get_provider.assert_not_called()
