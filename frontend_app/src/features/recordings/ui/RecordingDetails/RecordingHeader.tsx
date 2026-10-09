@@ -1,8 +1,9 @@
 import { memo } from "react";
 import { Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
+import { normalizeRecordingStatus } from "../../data/recording-status";
 import { TranscriptionStatusPopover } from "./TranscriptionStatusPopover";
-import type { ExtendedAudioRecording } from "./hooks/useRecordingData";
+import type { RecordingSummary } from "../../data/file-entry";
 import { Button } from "@/components/ui/button";
 import { EditableDisplayName } from "@/components/ui/editable-display-name";
 import { MotionDiv } from "@/components/ui/motion";
@@ -20,7 +21,7 @@ import { fadeInDown } from "@/lib/motion";
 
 
 interface RecordingHeaderProps {
-  recording: ExtendedAudioRecording;
+  recording: RecordingSummary;
   isTinyScreen: boolean;
   backTo?: "/audio-recordings" | "/audio-recordings/shared" | "/admin/all-jobs";
   showTranscriptionPopover?: boolean;
@@ -40,7 +41,7 @@ export const RecordingHeader = memo(function RecordingHeaderView({
   onDismissTranscriptionPopover,
   readOnlyName = false,
 }: RecordingHeaderProps) {
-  const status = recording.status;
+  const status = normalizeRecordingStatus(recording.status);
   const displayName = getDisplayName(recording);
   const isMobile = useIsMobile();
   const backLabel =
@@ -84,7 +85,9 @@ export const RecordingHeader = memo(function RecordingHeaderView({
             </Link>
             <div className="min-w-0 flex-1 overflow-hidden">
               {readOnlyName ? (
-                <span className={`block truncate ${isTinyScreen ? "xs:text-sm text-xs" : "xs:text-lg text-base sm:text-xl md:text-2xl"}`}>
+                <span
+                  className={`block truncate ${isTinyScreen ? "xs:text-sm text-xs" : "xs:text-lg text-base sm:text-xl md:text-2xl"}`}
+                >
                   {displayName}
                 </span>
               ) : (

@@ -30,6 +30,7 @@ import { isOnlineSync } from "@/lib/online-status";
 // Subcomponents
 
 interface MediaUploadFormProps {
+  teamsEventId?: string;
   mediaFile?: File | null;
   filePickerVisible?: boolean;
   submitLabel?: string;
@@ -37,13 +38,18 @@ interface MediaUploadFormProps {
 }
 
 export function MediaUploadForm({
+  teamsEventId,
   mediaFile,
   filePickerVisible = true,
   submitLabel = "Upload & Analyse",
   onSuccess,
 }: MediaUploadFormProps) {
   // Use the centralized hook for all form state and logic
-  const upload = useMediaUpload({ initialMediaFile: mediaFile, onSuccess });
+  const upload = useMediaUpload({
+    initialMediaFile: mediaFile,
+    onSuccess,
+    teamsEventId,
+  });
   const hasFile = !!upload.formValues.mediaFile;
   const [categoryPanelOpen, setCategoryPanelOpen] = useState(false);
 

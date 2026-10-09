@@ -150,7 +150,7 @@ function parseVtt(transcriptionText: string): ParsedTranscription {
     const endTime = parseTimestamp(endTimestamp);
     totalDuration = Math.max(totalDuration, endTime);
     const payload = lines.slice(timingIndex + 1).join(' ');
-    const voice = payload.match(/<v(?:\s+([^>]+))?>/i);
+    const voice = payload.match(/<v(?:\.[^\s>]+)*(?:\s+([^>]+))?>/i);
     const speakerLabel = voice?.[1] ? decodeVttText(voice[1].trim()) : '';
     const text = decodeVttText(payload.replace(/<[^>]*>/g, '').trim());
     if (!text) continue;

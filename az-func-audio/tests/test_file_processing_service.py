@@ -97,3 +97,10 @@ WEBVTT
         assert "Hello from the first segment." in result
         assert "--- Bob ---" in result
         assert "Hello from the second segment." in result
+
+    def test_preserves_named_voice_annotations_with_classes(self, file_processing_service):
+        content = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\n<v.meeting.speaker Alex>Hello</v>"
+        result = file_processing_service._process_vtt_content(content)
+        assert "--- Alex ---" in result
+        assert "Hello" in result
+        assert "<v" not in result

@@ -222,6 +222,40 @@ describe('FFmpeg Cross-Module Singleton', () => {
     expect(mockExec).toHaveBeenCalledTimes(3);
   });
 
+  it.each(['audio/wav', 'audio/x-wav', 'audio/wav;codecs=pcm'])('names existing WAV correctly without converting %s', async (type) => {
+    const { convertToWavWithFFmpeg } = await import('../lib/ffmpegConvert');
+    const onMetadata = vi.fn();
+    const input = createMockFile('continued.webm', type);
+    const output = await convertToWavWithFFmpeg(input, { onMetadata });
+    expect(output.name).toBe('continued.wav');
+    expect(output.type).toBe(type);
+    expect(output.size).toBe(input.size);
+    expect(mockLoad).not.toHaveBeenCalled();
+    expect(mockExec).not.toHaveBeenCalled();
+    expect(onMetadata).not.toHaveBeenCalled();
+  });
+
+  it('converts known WebM even when its filename says WAV', async () => {
+    const { convertToWavWithFFmpeg } = await import('../lib/ffmpegConvert');
+    const onMetadata = vi.fn();
+    const output = await convertToWavWithFFmpeg(createMockFile('recording.wav', 'audio/webm'), { onMetadata });
+    expect(mockWriteFile).toHaveBeenCalledWith('recording.webm', expect.any(Uint8Array));
+    expect(mockExec).toHaveBeenCalledOnce();
+    expect(output.name).toBe('recording.wav');
+    expect(output.type).toBe('audio/wav');
+    expect(onMetadata).toHaveBeenCalledWith(expect.objectContaining({ convertedToWav: true }));
+  });
+
+  it('keeps normalized original audio on conversion failure without reporting PCM', async () => {
+    const { convertToWavWithFFmpeg } = await import('../lib/ffmpegConvert');
+    const onMetadata = vi.fn();
+    mockExec.mockRejectedValueOnce(new Error('Conversion failed'));
+    const output = await convertToWavWithFFmpeg(createMockFile('recording.wav', 'audio/webm'), { onMetadata });
+    expect(output.name).toBe('recording.webm');
+    expect(output.type).toBe('audio/webm');
+    expect(onMetadata).not.toHaveBeenCalled();
+  });
+
   it('should decode and concatenate recording segments into one WAV', async () => {
     const { concatenateAudioSegments } = await import('../lib/ffmpegConvert');
     const first = new Blob(['first'], { type: 'audio/webm' });

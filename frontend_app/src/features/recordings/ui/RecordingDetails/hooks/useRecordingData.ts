@@ -32,7 +32,9 @@ export function useRecordingData(jobId: string) {
     enabled: !!jobId,
     refetchInterval: (query) =>
       query.state.data &&
-      ["uploaded", "transcribing", "transcribed", "analysing"].includes(query.state.data.status)
+      ["uploaded", "transcribing", "transcribed", "analysing"].includes(
+        query.state.data.status,
+      )
         ? 5000
         : false,
   });
@@ -51,12 +53,19 @@ export function useRecordingData(jobId: string) {
     error: transcriptionError,
     isFetching: isFetchingTranscription,
   } = useQuery({
-    ...getAudioTranscriptionQuery(jobId),
+    ...getAudioTranscriptionQuery(jobId, recording ? {
+      revision: recording.transcription_revision,
+      status: recording.status,
+    } : undefined),
     enabled:
       !!recording &&
-      (isVtt || ["transcribed", "analysing", "completed"].includes(recording.status)),
+      (isVtt ||
+        ["transcribed", "analysing", "completed"].includes(recording.status)),
     refetchInterval:
-      recording && ["uploaded", "transcribing", "transcribed", "analysing"].includes(recording.status)
+      recording &&
+      ["uploaded", "transcribing", "transcribed", "analysing"].includes(
+        recording.status,
+      )
         ? 5000
         : false,
     refetchOnWindowFocus: false,
@@ -77,13 +86,13 @@ export function useRecordingData(jobId: string) {
   // 3. Recording status is 'transcribing' (processing in progress)
   const isTranscriptionProcessing = Boolean(
     !transcriptionText &&
-      (isLoadingTranscription ||
-        isFetchingTranscription ||
-        (isTranscriptionError &&
-          [404, 409].includes(
-            transcriptionError?.status || transcriptionError?.response?.status,
-          )) ||
-        recording?.status === "transcribing"),
+    (isLoadingTranscription ||
+      isFetchingTranscription ||
+      (isTranscriptionError &&
+        [404, 409].includes(
+          transcriptionError?.status || transcriptionError?.response?.status,
+        )) ||
+      recording?.status === "transcribing"),
   );
 
   const shouldShowTranscriptionError =

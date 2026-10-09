@@ -1,5 +1,6 @@
 import asyncio
 import os
+import wave
 from io import BytesIO
 from unittest.mock import AsyncMock, MagicMock
 
@@ -17,6 +18,16 @@ def _upload(filename: str = "recording.wav", content: bytes = b"RIFF" + b"\x00" 
 async def _blob_chunks(*chunks: bytes):
     for chunk in chunks:
         yield chunk
+
+
+def _untagged_wav_content() -> bytes:
+    content = BytesIO()
+    with wave.open(content, "wb") as recording:
+        recording.setnchannels(1)
+        recording.setsampwidth(2)
+        recording.setframerate(16000)
+        recording.writeframes(b"\x00\x00" * 160)
+    return content.getvalue()
 
 
 def _service(
@@ -84,6 +95,7 @@ async def test_complete_direct_upload_creates_job_and_tracks_analytics():
     result = await service.complete_direct_upload(
         blob_url="https://storage/recordings/file.wav",
         filename="file.wav",
+        teams_event_id="calendar-event-1",
         current_user={"id": "user-123"},
         prompt_category_id="cat-1",
         prompt_subcategory_id=None,
@@ -103,6 +115,8 @@ async def test_complete_direct_upload_creates_job_and_tracks_analytics():
     assert result["id"] == "job-123"
     _, create_kwargs = job_service.create_job_from_blob.await_args
     assert create_kwargs["metadata"]["audio_duration_minutes"] == 2.0
+    assert create_kwargs["metadata"]["teams_event_id"] == "calendar-event-1"
+    assert create_kwargs["metadata"]["source"] == {"kind": "teams", "event_id": "calendar-event-1"}
     assert create_kwargs["metadata"]["recording_settings"] == {"source": "browser"}
     assert create_kwargs["metadata"]["recording_consent"] == {
         "accepted": True,
@@ -114,6 +128,40 @@ async def test_complete_direct_upload_creates_job_and_tracks_analytics():
     _, analytics_kwargs = analytics_service.track_job_event.await_args
     assert analytics_kwargs["metadata"]["upload_method"] == "direct"
     assert analytics_kwargs["metadata"]["file_size_bytes"] == 500
+
+
+@pytest.mark.parametrize("filename,content", [
+    pytest.param("file.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 124, id="native-webm"),
+    pytest.param("file.webm", _untagged_wav_content(), id="untagged-wav-webm-filename"),
+    pytest.param("file.m4a", b"\x00\x00\x00\x18ftypM4A " + b"\x00" * (64 * 1024) + b"exec(", id="m4a-incidental-exec"),
+])
+@pytest.mark.asyncio
+async def test_complete_direct_upload_accepts_supported_audio_without_conversion(filename, content):
+    storage_service = AsyncMock()
+    storage_service.is_expected_direct_upload_blob = MagicMock(return_value=True)
+    storage_service.verify_blob_exists.return_value = len(content)
+    storage_service.stream_blob_content = MagicMock(
+        return_value=_blob_chunks(content[:4], content[4:])
+    )
+    job_service = AsyncMock()
+    job_service.create_job_from_blob.return_value = {"id": "webm-job", "status": "uploaded"}
+    service = _service(storage_service=storage_service, job_service=job_service)
+
+    result = await service.complete_direct_upload(
+        blob_url=f"https://storage/recordings/{filename}",
+        filename=filename,
+        current_user={"id": "user-123"},
+        prompt_category_id=None,
+        prompt_subcategory_id=None,
+        pre_session_form_data=None,
+        audio_duration_seconds=None,
+        audio_duration_minutes=None,
+        recording_settings=None,
+    )
+
+    assert result["id"] == "webm-job"
+    job_service.create_job_from_blob.assert_awaited_once()
+    assert job_service.create_job_from_blob.await_args.kwargs["original_filename"] == filename
 
 
 @pytest.mark.asyncio

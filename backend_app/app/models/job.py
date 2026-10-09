@@ -10,6 +10,7 @@ from app.models.job_status import (
     TERMINAL_STATUSES,
     IN_PROGRESS_STATUSES,
 )
+from app.models.job_source import TeamsJobSource
 
 
 class Job(BaseModel):
@@ -25,9 +26,13 @@ class Job(BaseModel):
     file_name: str
     file_path: str
     status: str = "uploaded"
+    source: Optional[TeamsJobSource] = None
+    teams_event_id: Optional[str] = None
     
     # Optional fields
     transcription_file_path: Optional[str] = None
+    transcription_revision: Optional[str] = None
+    speaker_identification: Optional[dict[str, Any]] = None
     analysis_file_path: Optional[str] = None
     text_content: Optional[str] = None
     

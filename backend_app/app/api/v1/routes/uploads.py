@@ -1,4 +1,4 @@
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
 from fastapi import APIRouter, Depends, File, Form, UploadFile
 from fastapi.responses import JSONResponse
@@ -50,6 +50,7 @@ async def complete_direct_upload(
         audio_duration_seconds=body.audio_duration_seconds,
         audio_duration_minutes=body.audio_duration_minutes,
         recording_settings=body.recording_settings,
+        teams_event_id=body.teams_event_id,
         recording_consent=(
             body.recording_consent.model_dump(mode="json")
             if body.recording_consent
@@ -66,6 +67,7 @@ async def upload_job_file(
     prompt_subcategory_id: Optional[str] = Form(None),
     pre_session_form_data: Optional[str] = Form(None),
     recording_consent: Optional[str] = Form(None),
+    teams_event_id: Annotated[Optional[str], Form(min_length=1, max_length=2048)] = None,
     current_user: dict[str, Any] = Depends(get_current_user),
     upload_workflow: UploadWorkflowService = Depends(get_upload_workflow_service),
 ):
@@ -75,6 +77,7 @@ async def upload_job_file(
         prompt_category_id=prompt_category_id,
         prompt_subcategory_id=prompt_subcategory_id,
         pre_session_form_data=pre_session_form_data,
+        teams_event_id=teams_event_id,
         recording_consent=(
             RecordingConsentEvidenceRequest.model_validate_json(recording_consent).model_dump(mode="json")
             if recording_consent

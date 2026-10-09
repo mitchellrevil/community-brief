@@ -24,3 +24,9 @@ def test_recording_consent_allows_legacy_uploads_to_omit_evidence():
         }
     )
     assert upload.recording_consent is None
+
+
+@pytest.mark.parametrize("event_id", ["", "x" * 2049])
+def test_teams_event_id_is_bounded(event_id):
+    with pytest.raises(ValidationError):
+        UploadCompleteRequest(blob_url="https://storage/file.vtt", filename="file.vtt", teams_event_id=event_id)

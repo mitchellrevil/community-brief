@@ -5,6 +5,20 @@ import re
 from pydantic import BaseModel, Field, field_validator
 
 from ..utils.input_validation import InputValidator
+from ..models.job_source import TeamsJobSource
+
+
+class TeamsImportSummary(BaseModel):
+    id: str
+    status: str
+    created_at: str
+    updated_at: str | None = None
+    teams_event_id: str | None = None
+    source: TeamsJobSource | None = None
+    file_name: str | None = None
+    displayname: str | None = None
+    display_name: str | None = None
+    filename: str | None = None
 
 
 class JobUpdateRequest(BaseModel):

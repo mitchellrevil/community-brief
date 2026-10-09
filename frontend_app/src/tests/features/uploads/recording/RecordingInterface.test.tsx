@@ -6,6 +6,7 @@ import { RecordingInterface } from "@/features/uploads/recording/RecordingInterf
 
 const mocks = vi.hoisted(() => ({
   concatenateAudioSegments: vi.fn(),
+  convertToWavWithFFmpeg: vi.fn(),
   audioLevel: 0,
   captureCleanup: vi.fn(),
   createRecordingCapture: vi.fn(),
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   onUploadComplete: vi.fn(),
   updateJobDisplayName: vi.fn(),
   uploadFile: vi.fn(),
+  uploadFailed: vi.fn(),
   warning: vi.fn(),
 }));
 
@@ -67,12 +69,8 @@ vi.mock("@/features/recordings/data/api", () => ({
 vi.mock("@/lib/ffmpegConvert", () => ({
   concatenateAudioSegments: (...args: Array<unknown>) =>
     mocks.concatenateAudioSegments(...args),
-  convertToWavWithFFmpeg: (file: File, options: any) => {
-    options.onMetadata?.({ durationSeconds: 3 });
-    return Promise.resolve(
-      new File([file], "converted.wav", { type: "audio/wav" }),
-    );
-  },
+  convertToWavWithFFmpeg: (...args: Array<unknown>) =>
+    mocks.convertToWavWithFFmpeg(...args),
 }));
 
 vi.mock("@/lib/audio-compression", () => ({
@@ -107,7 +105,7 @@ vi.mock("@/lib/toast-utils", () => ({
     microphoneError: vi.fn(),
   },
   uploadToasts: {
-    failed: vi.fn(),
+    failed: mocks.uploadFailed,
     success: vi.fn(),
   },
 }));
@@ -162,6 +160,16 @@ describe("RecordingInterface", () => {
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
+    mocks.convertToWavWithFFmpeg.mockImplementation((file: File, options: any) => {
+      if (file.type !== "audio/wav") {
+        options.onMetadata?.({ durationSeconds: 3, convertedToWav: true });
+      }
+      return Promise.resolve(
+        file.type === "audio/wav"
+          ? file
+          : new File([file], "converted.wav", { type: "audio/wav" }),
+      );
+    });
     mocks.audioLevel = 0;
     const track = { kind: "audio", stop: vi.fn(), addEventListener: vi.fn() };
     const stream = {
@@ -512,8 +520,13 @@ describe("RecordingInterface", () => {
     expect(mocks.createRecordingCapture).not.toHaveBeenCalled();
   });
 
-  it("merges separate media segments when continuing a recording", async () => {
+  it("merges continued recording segments and submits them with a WAV filename", async () => {
     const user = userEvent.setup();
+    const joinedRecording = new File(["joined-audio"], "continued-recording.wav", {
+      type: "audio/wav",
+    });
+    mocks.concatenateAudioSegments.mockResolvedValueOnce(joinedRecording);
+    mocks.fetchAudioBlob.mockResolvedValueOnce(joinedRecording);
 
     renderRecordingInterface();
     await user.click(screen.getByRole("button", { name: "Start" }));
@@ -542,6 +555,85 @@ describe("RecordingInterface", () => {
         type: "audio/wav",
       }),
     );
+
+    await user.click(screen.getByRole("button", { name: "Submit Recording" }));
+    await waitFor(() => expect(mocks.uploadFile).toHaveBeenCalledOnce());
+    // An already-WAV file skips conversion, so its name must be correct on entry.
+    expect(mocks.convertToWavWithFFmpeg).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: expect.stringMatching(/\.wav$/),
+        type: "audio/wav",
+      }),
+      expect.any(Object),
+    );
+    const uploadedFile = mocks.uploadFile.mock.calls[0][0] as File;
+    expect(uploadedFile.type).toBe("audio/wav");
+    expect(uploadedFile.name).toMatch(/\.wav$/);
+    expect(mocks.uploadFile.mock.calls[0][5].recording_settings).toMatchObject({
+      capture_mode: "microphone", mime_type: "audio/wav",
+      codec: "pcm_s16le", sample_rate_hz: 16000, channels: 1,
+    });
+  });
+
+  it("restores joined WAV settings before submitting a draft with continuation audio", async () => {
+    const user = userEvent.setup();
+    const joinedRecording = new File(["joined-audio"], "continued-recording.wav", {
+      type: "audio/wav",
+    });
+    mocks.getDraftRecording.mockResolvedValue({
+      id: "continued-draft",
+      categoryId: "category-1",
+      subcategoryId: "subcategory-1",
+      audioBlob: new Blob(["base"], { type: "audio/webm" }),
+      continuationBlob: new Blob(["continuation"], { type: "audio/webm" }),
+      duration: 3,
+      timestamp: Date.now(),
+    });
+    mocks.concatenateAudioSegments.mockResolvedValueOnce(joinedRecording);
+    mocks.fetchAudioBlob.mockResolvedValueOnce(joinedRecording);
+
+    renderRecordingInterface();
+    await user.click(await screen.findByRole("button", { name: "Restore Draft" }));
+    await user.click(screen.getByRole("button", { name: "Submit Recording" }));
+
+    await waitFor(() => expect(mocks.uploadFile).toHaveBeenCalledOnce());
+    const [file, , , , , metadata] = mocks.uploadFile.mock.calls[0];
+    expect(file.name).toMatch(/\.wav$/);
+    expect(file.type).toBe("audio/wav");
+    expect(metadata.recording_settings).toMatchObject({
+      mime_type: "audio/wav", codec: "pcm_s16le",
+      sample_rate_hz: 16000, channels: 1,
+    });
+  });
+
+  it("keeps WebM filename, MIME, metadata and recovery download when conversion falls back", async () => {
+    mocks.convertToWavWithFFmpeg.mockImplementationOnce((file: File) => Promise.resolve(file));
+    mocks.uploadFile.mockRejectedValueOnce(new Error("File content does not match a supported audio format"));
+    const user = userEvent.setup();
+    renderRecordingInterface();
+    await user.click(screen.getByRole("button", { name: "Start" }));
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await user.click(screen.getByRole("button", { name: "Submit Recording" }));
+    await waitFor(() => expect(mocks.uploadFile).toHaveBeenCalledOnce());
+    const [file, , , , , metadata] = mocks.uploadFile.mock.calls[0];
+    expect(file.name).toMatch(/\.webm$/);
+    expect(file.type).toBe("audio/webm");
+    expect(metadata.recording_settings).toMatchObject({ mime_type: "audio/webm" });
+    expect(metadata.recording_settings).not.toHaveProperty("codec");
+    expect(metadata.recording_settings).not.toHaveProperty("sample_rate_hz");
+    expect(metadata.recording_settings).not.toHaveProperty("channels");
+    await waitFor(() => expect(mocks.uploadFailed).toHaveBeenCalledOnce());
+    const downloads: Array<string> = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      downloads.push(this.download);
+    });
+    try {
+      await act(async () => { await mocks.uploadFailed.mock.calls[0][0].onDownload(); });
+      expect(downloads).toHaveLength(1);
+      expect(downloads[0]).toMatch(/\.webm$/);
+    } finally {
+      click.mockRestore();
+    }
   });
 
   it("restores the previous recording when segment merging fails", async () => {

@@ -20,8 +20,8 @@ interface RecordingActionsCardProps {
   canManageSharing?: boolean;
   canDelete?: boolean;
   jobId: string;
-  onShare: () => void;
-  onDelete: () => void;
+  onShare?: () => void;
+  onDelete?: () => void;
   onReprocess?: () => void;
   onDownloadAudio?: () => void;
   onDownloadTranscription?: () => void;
@@ -93,7 +93,7 @@ export const RecordingActionsCard = memo(function RecordingActionsCardView({
   };
 
   const fileType = getFileType(resolveAnalysisPath());
-  const showShareButton = isOwner || canManageSharing;
+  const showShareButton = Boolean(onShare) && (isOwner || canManageSharing);
 
   const getAttemptFileName = (attemptNumber: number = normalizedAttempts.length) => {
     const suffix = normalizedAttempts.length > 1 ? `_attempt_${attemptNumber}` : '';
@@ -233,7 +233,7 @@ export const RecordingActionsCard = memo(function RecordingActionsCardView({
           </>
         )}
 
-        {canDelete && (
+        {canDelete && onDelete && (
           <>
             <Button
               onClick={onDelete}

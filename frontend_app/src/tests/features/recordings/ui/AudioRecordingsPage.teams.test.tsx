@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
+  act,
   fireEvent,
   render,
   screen,
@@ -19,10 +20,13 @@ const mocks = vi.hoisted(() => ({
   navigate: vi.fn(),
   getFiles: vi.fn(),
   getMeetings: vi.fn(),
+  getMedia: vi.fn(),
+  getImports: vi.fn(),
   downloadTranscript: vi.fn(),
   auth: { user: { user_id: "user-1", auth_source: "entra" }, isLoading: false },
   token: vi.fn((_scopes: Array<string>, enabled: boolean) => ({
     accessToken: enabled ? "token" : null,
+    getAccessToken: vi.fn().mockResolvedValue("token"),
     isLoading: false,
     error: null,
   })),
@@ -50,12 +54,12 @@ vi.mock("@/features/auth/hooks/useMicrosoftAccessToken", () => ({
 vi.mock("@/features/recordings/data/api", async (importOriginal) => ({
   ...(await importOriginal<typeof RecordingsApi>()),
   getAudioRecordings: mocks.getFiles,
+  getTeamsImportJobs: mocks.getImports,
 }));
 vi.mock("@/features/teams/data/api", async (importOriginal) => ({
   ...(await importOriginal<typeof TeamsApi>()),
   getRecentTeamsMeetingCandidates: mocks.getMeetings,
-  getTeamsMeetingsPage: (_token: string, candidates: Array<TeamsMeeting>) =>
-    Promise.resolve({ meetings: candidates, nextOffset: null }),
+  getMeetingMedia: mocks.getMedia,
   downloadTeamsTranscript: mocks.downloadTranscript,
 }));
 vi.mock("@/components/ui/editable-display-name", () => ({
@@ -134,6 +138,10 @@ describe("My Files source filters", () => {
     vi.spyOn(window, "scrollTo").mockImplementation(() => {});
     mocks.auth.user = { user_id: "user-1", auth_source: "entra" };
     mocks.getMeetings.mockResolvedValue([meeting]);
+    mocks.getMedia.mockImplementation((_token, candidate) =>
+      Promise.resolve(candidate),
+    );
+    mocks.getImports.mockResolvedValue([]);
     mocks.downloadTranscript.mockResolvedValue({
       file: new File(["WEBVTT"], "weekly_review.vtt"),
       transcriptCount: 1,
@@ -257,8 +265,7 @@ describe("My Files source filters", () => {
     renderPage(2);
     expect(await screen.findByText("Weekly review")).toBeInTheDocument();
     expect(displayedTitles()).toEqual(["Newest Community Brief file", "Weekly review"]);
-    // Wait for the initial URL filter synchronisation before paging.
-    await waitFor(() => expect(mocks.navigate).toHaveBeenCalled());
+    expect(mocks.navigate).not.toHaveBeenCalled();
     await user.click(screen.getByLabelText("Go to next page"));
     expect(await screen.findByText("Older Community Brief file")).toBeInTheDocument();
     expect(displayedTitles()).toEqual(["Older Community Brief file"]);
@@ -297,7 +304,11 @@ describe("My Files source filters", () => {
     );
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByText("weekly_review.vtt")).toBeInTheDocument();
-    expect(mocks.downloadTranscript).toHaveBeenCalledWith("token", meeting, "token");
+    expect(mocks.downloadTranscript).toHaveBeenCalledWith(
+      expect.any(Function),
+      meeting,
+      expect.any(Function),
+    );
     await user.click(
       within(dialog).getByRole("button", { name: "Submit transcript" }),
     );
@@ -314,5 +325,93 @@ describe("My Files source filters", () => {
     renderPage();
     expect(await screen.findByText("Newest Community Brief file")).toBeInTheDocument();
     expect(screen.getByRole("alert")).toBeInTheDocument();
+  });
+
+  it("opens persisted Teams jobs before Graph finishes and removes their duplicate file cards", async () => {
+    localStorage.setItem("audio-recordings-include-teams", "true");
+    mocks.getMeetings.mockReturnValue(new Promise(() => {}));
+    mocks.getImports.mockResolvedValue([
+      { ...files[0], teams_event_id: meeting.id },
+    ]);
+    renderPage();
+    const viewJob = await screen.findByRole("button", { name: "View job" });
+    expect(screen.getAllByText("Newest Community Brief file")).toHaveLength(1);
+    expect(screen.getByText("Processed")).toBeInTheDocument();
+    expect(screen.getByText(/Checking Teams meetings/)).toBeInTheDocument();
+    await userEvent.click(viewJob);
+    expect(mocks.navigate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        to: "/audio-recordings/$id",
+        params: { id: "newer" },
+      }),
+    );
+    await userEvent.click(
+      screen.getByRole("checkbox", { name: "Community Brief files" }),
+    );
+    expect(
+      screen.getByRole("button", { name: "View job" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders each ready meeting, isolates failures and keeps at most four checks in flight", async () => {
+    localStorage.setItem("audio-recordings-include-teams", "true");
+    localStorage.setItem("audio-recordings-include-files", "false");
+    const meetings = Array.from({ length: 8 }, (_, index) => ({
+      ...meeting,
+      id: `meeting-${index}`,
+      subject: `Meeting ${index}`,
+    }));
+    mocks.getMeetings.mockResolvedValue(meetings);
+    const pending = new Map<
+      string,
+      {
+        resolve: (meeting: TeamsMeeting) => void;
+        reject: (error: Error) => void;
+      }
+    >();
+    mocks.getMedia.mockImplementation(
+      (_token, candidate) =>
+        new Promise((resolve, reject) =>
+          pending.set(candidate.id, { resolve, reject }),
+        ),
+    );
+    renderPage();
+    await waitFor(() => expect(mocks.getMedia).toHaveBeenCalledTimes(4));
+    act(() => pending.get("meeting-1")!.resolve(meetings[1]));
+    expect(await screen.findByText("Meeting 1")).toBeInTheDocument();
+    expect(screen.queryByText("Meeting 0")).not.toBeInTheDocument();
+    await waitFor(() => expect(mocks.getMedia).toHaveBeenCalledTimes(5));
+    act(() =>
+      pending.get("meeting-2")!.reject(new Error("Graph unavailable")),
+    );
+    await waitFor(() => expect(mocks.getMedia).toHaveBeenCalledTimes(6));
+    expect(screen.getByText("Meeting 1")).toBeInTheDocument();
+    expect(mocks.downloadTranscript).not.toHaveBeenCalled();
+  });
+
+  it("starts discovery from a partial calendar page and skips checks for explicitly linked imports", async () => {
+    localStorage.setItem("audio-recordings-include-teams", "true");
+    localStorage.setItem("audio-recordings-include-files", "false");
+    mocks.getImports.mockResolvedValue([
+      {
+        id: "existing",
+        teams_event_id: meeting.id,
+        status: "completed",
+        created_at: "2026-09-10T09:00:00Z",
+        displayname: "Saved Teams job",
+      },
+    ]);
+    mocks.getMeetings.mockImplementation((_token, _now, options) => {
+      options.onMeetings([
+        meeting,
+        { ...meeting, id: "other", subject: "Another meeting" },
+      ]);
+      return new Promise(() => {});
+    });
+    renderPage();
+    expect(await screen.findByText("Another meeting")).toBeInTheDocument();
+    expect(screen.getByText("Saved Teams job")).toBeInTheDocument();
+    expect(mocks.getMedia).toHaveBeenCalledTimes(1);
+    expect(mocks.getMedia.mock.calls[0][1].id).toBe("other");
   });
 });
