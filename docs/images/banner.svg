@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="240" viewBox="0 0 1440 240" fill="none">
+  <title>Community Brief</title>
+  <desc>Recording, transcription and meeting analysis.</desc>
+  <rect width="1440" height="240" rx="12" fill="#111827"/>
+  <g transform="translate(64 71)">
+    <path d="M53 4h30v82H53V4Z" stroke="#38bdf8" stroke-width="8" stroke-linejoin="round"/>
+    <path d="M6 59h18l10-25 12 41 12-25 10 9h21" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <text x="198" y="119" font-family="Segoe UI,Arial,sans-serif" font-size="54" font-weight="650" fill="#f8fafc">Community Brief</text>
+  <text x="201" y="164" font-family="Segoe UI,Arial,sans-serif" font-size="24" fill="#cbd5e1">Recording, transcription and meeting analysis.</text>
+</svg>
