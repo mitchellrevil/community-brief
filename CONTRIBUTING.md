@@ -7,7 +7,7 @@ Contributions to application code, documentation, accessibility, and setup are w
 ## Workflow
 
 1. Fork and clone the repository, then create a focused branch.
-2. Follow [Getting started](docs/getting-started.md) using your own development resources.
+2. Use the component quickstarts linked from the [README](README.md#documentation) with your own development resources.
 3. Update documentation when behaviour or setup changes.
 4. Run relevant checks and describe validation in your pull request. Include screenshots for visual changes.
 
