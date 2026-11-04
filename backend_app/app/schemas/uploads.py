@@ -30,3 +30,4 @@ class UploadCompleteRequest(BaseModel):
     audio_duration_minutes: Optional[float] = None
     recording_settings: Optional[Dict[str, Any]] = None
     recording_consent: Optional[RecordingConsentEvidenceRequest] = None
+    teams_event_id: Optional[str] = Field(None, min_length=1, max_length=2048)

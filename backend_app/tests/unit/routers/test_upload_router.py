@@ -61,6 +61,7 @@ async def test_complete_direct_upload_returns_created_job_response(current_user)
         audio_duration_seconds=None,
         audio_duration_minutes=None,
         recording_settings=None,
+        teams_event_id=None,
         recording_consent=None,
     )
 
@@ -89,5 +90,6 @@ async def test_upload_job_file_returns_created_job_response(current_user):
         prompt_category_id=None,
         prompt_subcategory_id=None,
         pre_session_form_data=None,
+        teams_event_id=None,
         recording_consent=None,
     )

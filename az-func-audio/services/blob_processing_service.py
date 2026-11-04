@@ -25,7 +25,7 @@ from services.artifact_naming import (
     is_reprocess_artifact,
     is_system_generated_file,
 )
-from services.speaker_identification_service import SpeakerIdentificationService
+from services.transcript_enrichment import enrich_transcript
 from utils.file_types import get_file_type
 
 
@@ -652,63 +652,34 @@ class BlobProcessingService:
         job_id: str,
         correlation_id: str,
     ) -> str:
-        if not prompt_metadata.get("speaker_identification_enabled", False):
+        result = enrich_transcript(
+            formatted_text,
+            prompt_metadata=prompt_metadata,
+            session_data=file_doc.get("pre_session_form_data"),
+            analysis_service=analysis_service,
+            model=getattr(config, "speaker_identification_model", "gpt-5.6-luna"),
+            job_id=job_id,
+            correlation_id=correlation_id,
+        )
+        if result.speaker_identification is None:
             return formatted_text
-
-        transcription_url = file_doc.get("transcription_file_path")
         try:
-            speaker_model = getattr(config, "speaker_identification_model", "gpt-5.6-luna")
-            self.logger.info(
-                "blob.speaker_identification.started",
-                correlation_id=correlation_id,
-                job_id=job_id,
-                model=speaker_model,
-                transcript_chars=len(formatted_text),
-                has_session_data=bool(file_doc.get("pre_session_form_data")),
-            )
-            service = SpeakerIdentificationService(
-                analysis_service=analysis_service,
-                model=speaker_model,
-            )
-            updated_text, metadata = service.identify(
-                formatted_text,
-                session_data=file_doc.get("pre_session_form_data"),
-            )
-            if updated_text == formatted_text:
-                self.logger.info(
-                    "blob.speaker_identification.no_changes",
-                    correlation_id=correlation_id,
-                    job_id=job_id,
-                    reason=metadata.get("reason"),
-                )
-                return formatted_text
-
-            if transcription_url:
-                storage_service.upload_text_to_blob(transcription_url, updated_text)
-            cosmos_service.update_job_status(
-                job_id,
-                JobStatus.TRANSCRIBED,
-                transcription_file_path=transcription_url,
-                speaker_identification=metadata,
-            )
-            self.logger.info(
-                "blob.speaker_identification.applied",
-                correlation_id=correlation_id,
-                job_id=job_id,
-                labels=list((metadata.get("labels") or {}).keys()),
-            )
-            return updated_text
+            updates: dict[str, Any] = {"speaker_identification": result.speaker_identification}
+            transcription_url = file_doc.get("transcription_file_path")
+            if result.text != formatted_text and transcription_url:
+                storage_service.upload_text_to_blob(transcription_url, result.text)
+                updates["transcription_revision"] = datetime.now(UTC).isoformat()
+            cosmos_service.update_job_status(job_id, JobStatus.TRANSCRIBED, **updates)
         except Exception as exc:
-            # Speaker labels are enrichment only; transcription and analysis must continue.
             self.logger.warning(
                 "blob.speaker_identification.failed",
-                correlation_id=correlation_id,
                 job_id=job_id,
-                error=str(exc),
+                correlation_id=correlation_id,
                 error_type=type(exc).__name__,
-                exc_info=True,
+                stage="persistence",
             )
             return formatted_text
+        return result.text
 
     async def analyze_content(
         self,

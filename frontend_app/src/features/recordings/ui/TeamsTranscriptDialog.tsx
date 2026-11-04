@@ -33,7 +33,17 @@ export function TeamsTranscriptDialog({
               details.
             </DialogDescription>
           </DialogHeader>
+          {transcript.bundle.source === "transcript" &&
+            !transcript.bundle.hasSpeakerAttribution && (
+              <p role="status" className="text-muted-foreground text-sm">
+                Teams supplied these captions without speaker names. Processing
+                this transcript preserves the text. Speaker labels require
+                transcription of the meeting recording with speaker detection
+                enabled.
+              </p>
+            )}
           <MediaUploadForm
+            teamsEventId={transcript.meeting.id}
             key={transcript.bundle.file.name}
             mediaFile={transcript.bundle.file}
             filePickerVisible={false}

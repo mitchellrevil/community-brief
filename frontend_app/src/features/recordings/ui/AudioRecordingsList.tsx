@@ -1,26 +1,28 @@
 import { memo } from "react";
+import { Link } from "@tanstack/react-router";
 import { FileAudio, Loader2, Video } from "lucide-react";
+import { getTeamsEventId } from "../data/recording-source";
 import { AudioRecordingCard } from "./AudioRecordingCard";
-import type {TeamsMeeting} from "@/features/teams";
-import {  getTeamsAccessRequestUrl } from "@/features/teams";
+import type { TeamsMeeting } from "@/features/teams";
+import type { FileEntry, ListedJob } from "../data/file-entry";
 import { Button } from "@/components/ui/button";
 import { MotionList, MotionListItem } from "@/components/ui/motion-list";
 import { Skeleton } from "@/components/ui/skeleton";
+import { getTeamsAccessRequestUrl } from "@/features/teams";
+import { useIsMobile } from "@/hooks/useMobile";
 import { formatDateTime } from "@/lib/date-utils";
 import { isAudioFile } from "@/lib/file-utils";
 
 
 interface AudioRecordingsListProps {
-  recordings: Array<any>;
+  entries: Array<FileEntry>;
   isLoading: boolean;
   viewMode: "card" | "table";
-  onViewModeChange: (mode: "card" | "table") => void;
-  onViewDetails: (recording: any) => void;
-  onPlay: (recording: any) => void;
-  onDownload: (recording: any) => void;
-  onRetryProcessing: (recording: any) => void;
-  onShare: (recording: any) => void;
-  onDelete: (recording: any) => void;
+  onViewDetails: (recording: ListedJob) => void;
+  onPlay: (recording: ListedJob) => void;
+  onDownload: (recording: ListedJob) => void;
+  onShare: (recording: ListedJob) => void;
+  onDelete: (recording: ListedJob) => void;
   "data-tutorial"?: string;
   onProcessTeamsMeeting?: (meeting: TeamsMeeting) => void;
   processingTeamsMeetingId?: string | null;
@@ -29,14 +31,12 @@ interface AudioRecordingsListProps {
 }
 
 function AudioRecordingsListComponent({
-  recordings,
+  entries,
   isLoading,
   viewMode,
-  onViewModeChange,
   onViewDetails,
   onPlay,
   onDownload,
-  onRetryProcessing,
   onShare,
   onDelete,
   "data-tutorial": dataTutorial,
@@ -45,11 +45,12 @@ function AudioRecordingsListComponent({
   isProcessingTeamsMeeting,
   deniedTeamsMeetingIds = [],
 }: AudioRecordingsListProps) {
+  const isMobile = useIsMobile();
   if (isLoading) {
     return <LoadingSkeleton viewMode={viewMode} />;
   }
 
-  if (recordings.length === 0) {
+  if (entries.length === 0) {
     return (
       <div className="bg-muted/10 flex flex-col items-center justify-center rounded-lg border border-dashed py-12 text-center">
         <div className="bg-muted mb-4 rounded-full p-4">
@@ -63,7 +64,7 @@ function AudioRecordingsListComponent({
     );
   }
 
-  const useCardLayout = viewMode === "card" || window.innerWidth < 640;
+  const useCardLayout = viewMode === "card" || isMobile;
 
   return (
     <div className="w-full space-y-4" data-tutorial={dataTutorial}>
@@ -75,19 +76,25 @@ function AudioRecordingsListComponent({
             : "flex flex-col gap-2"
         }
       >
-        {recordings.map((recording) =>
-          recording.source === "teams" ? (
-            <MotionListItem key={recording.id} as="div">
+        {entries.map((entry) => (
+          <MotionListItem key={entry.id} as="div">
+            {entry.kind === "queued" ? (
               <AudioRecordingCard
-                recording={recording}
+                recording={entry.recording}
                 layout={useCardLayout ? "card" : "list"}
                 isEditable={false}
-                ownerLabel={recording.teamsMeeting.organizer}
+              />
+            ) : entry.kind === "meeting" ? (
+              <AudioRecordingCard
+                recording={entry.recording}
+                layout={useCardLayout ? "card" : "list"}
+                isEditable={false}
+                ownerLabel={entry.meeting.organizer}
                 statusLabel={
-                  recording.teamsMeeting.transcriptAccessDenied ||
-                  deniedTeamsMeetingIds.includes(recording.teamsMeeting.id)
+                  entry.meeting.transcriptAccessDenied ||
+                  deniedTeamsMeetingIds.includes(entry.meeting.id)
                     ? "Transcript access needed"
-                    : recording.teamsMeeting.transcriptIds?.length
+                    : entry.meeting.transcriptIds?.length
                       ? "Transcript available"
                       : "Recording available"
                 }
@@ -95,45 +102,59 @@ function AudioRecordingsListComponent({
                 metadataItems={[
                   {
                     label: "Meeting",
-                    value: formatDateTime(recording.teamsMeeting.startDateTime),
+                    value: formatDateTime(entry.meeting.startDateTime),
                   },
                 ]}
                 primaryAction={
                   <TeamsMeetingActions
-                    meeting={recording.teamsMeeting}
-                    displayName={recording.displayname}
+                    meeting={entry.meeting}
+                    displayName={entry.meeting.subject}
                     accessDenied={
-                      recording.teamsMeeting.transcriptAccessDenied ||
-                      deniedTeamsMeetingIds.includes(recording.teamsMeeting.id)
+                      entry.meeting.transcriptAccessDenied ||
+                      deniedTeamsMeetingIds.includes(entry.meeting.id)
                     }
                     useCardLayout={useCardLayout}
                     onProcess={onProcessTeamsMeeting}
-                    onView={() => onViewDetails(recording)}
                     isProcessing={isProcessingTeamsMeeting}
                     processingMeetingId={processingTeamsMeetingId}
                   />
                 }
               />
-            </MotionListItem>
-          ) : (
-            <MotionListItem key={recording.id} as="div">
+            ) : (
               <AudioRecordingCard
-                recording={recording}
+                recording={entry.recording}
                 layout={useCardLayout ? "card" : "list"}
-                onViewDetails={() => onViewDetails(recording)}
+                ownerLabel={entry.meeting?.organizer}
+                onViewDetails={() => onViewDetails(entry.recording)}
                 onPlay={
-                  isAudioFile(recording.file_path)
-                    ? () => onPlay(recording)
+                  entry.recording.file_path &&
+                  isAudioFile(entry.recording.file_path)
+                    ? () => onPlay(entry.recording)
                     : undefined
                 }
-                onDownload={() => onDownload(recording)}
-                onRetryProcessing={() => onRetryProcessing(recording)}
-                onShare={() => onShare(recording)}
-                onDelete={() => onDelete(recording)}
+                onDownload={
+                  entry.recording.file_path
+                    ? () => onDownload(entry.recording)
+                    : undefined
+                }
+                onShare={() => onShare(entry.recording)}
+                onDelete={() => onDelete(entry.recording)}
+                primaryAction={
+                  getTeamsEventId(entry.recording) ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8"
+                      onClick={() => onViewDetails(entry.recording)}
+                    >
+                      View job
+                    </Button>
+                  ) : undefined
+                }
               />
-            </MotionListItem>
-          ),
-        )}
+            )}
+          </MotionListItem>
+        ))}
       </MotionList>
     </div>
   );
@@ -147,7 +168,6 @@ function TeamsMeetingActions({
   accessDenied,
   useCardLayout,
   onProcess,
-  onView,
   isProcessing,
   processingMeetingId,
 }: {
@@ -156,7 +176,6 @@ function TeamsMeetingActions({
   accessDenied: boolean;
   useCardLayout: boolean;
   onProcess?: (meeting: TeamsMeeting) => void;
-  onView: () => void;
   isProcessing?: boolean;
   processingMeetingId?: string | null;
 }) {
@@ -167,8 +186,14 @@ function TeamsMeetingActions({
   return (
     <div className="flex flex-wrap items-center gap-2">
       {!accessDenied && Boolean(meeting.transcriptIds?.length) && (
-        <Button variant="outline" size="sm" className="h-8" onClick={onView}>
-          View transcription
+        <Button asChild variant="outline" size="sm" className="h-8">
+          <Link
+            to="/audio-recordings/$id"
+            params={{ id: `teams:${meeting.id}` }}
+            search={{ from: "files" }}
+          >
+            View transcription
+          </Link>
         </Button>
       )}
       {canProcess && (
@@ -177,7 +202,7 @@ function TeamsMeetingActions({
           size="sm"
           className={useCardLayout ? "h-8 min-w-0 flex-1 gap-2" : "h-8 gap-2"}
           onClick={() => onProcess?.(meeting)}
-          disabled={isProcessing}
+          disabled={isProcessing || !onProcess}
           aria-label={`Process ${processKind} for ${displayName}`}
         >
           {processingMeetingId === meeting.id ? (

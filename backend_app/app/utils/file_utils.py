@@ -251,8 +251,8 @@ class FileUtils:
 
     @classmethod
     def _is_safe_audio_content(cls, file_path: str, file_extension: str) -> bool:
-        if not cls._is_safe_upload_content(file_path, file_extension):
-            return False
+        # Binary audio can contain incidental text patterns. Validate its format
+        # without scanning the media payload for executable-looking strings.
         with open(file_path, "rb") as file_handle:
             head = file_handle.read(4096)
         return cls._matches_audio_signature(file_extension, head, file_path)
@@ -279,7 +279,9 @@ class FileUtils:
         if MUTAGEN_AVAILABLE:
             try:
                 audio_file = MutagenFile(file_path)
-                return bool(audio_file and getattr(audio_file, "info", None))
+                # Mutagen objects without metadata tags are falsey even when
+                # they contain recognized audio and valid stream information.
+                return audio_file is not None and getattr(audio_file, "info", None) is not None
             except Exception:
                 return False
 

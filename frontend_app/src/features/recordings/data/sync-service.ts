@@ -6,6 +6,8 @@
  * Uses sync coordinator to prevent duplicate concurrent syncs.
  */
 
+import type { AudioFfmpegMetadata } from '@/lib/ffmpegConvert';
+import type { RecordingSettings } from '@/types/audio-upload';
 import { isOnline } from '@/lib/online-status';
 import {
   getPendingRecordings,
@@ -16,6 +18,7 @@ import {
   markRecordingUploading,
 } from '@/lib/pwa-queue';
 import { uploadFile } from '@/features/recordings/data/api';
+import { getAudioFileExtension, normalizeAudioFilename } from '@/lib/audio-format';
 
 interface SyncResult {
   success: number;
@@ -71,19 +74,19 @@ export async function startSync(): Promise<SyncResult> {
       }
 
       // Create a File object from the blob with proper extension
-      const fileExtension = recording.blob.type === 'text/vtt' ? 'vtt' :
-                           recording.blob.type.includes('mp4') || recording.blob.type.includes('m4a') ? 'm4a' :
-                           recording.blob.type.includes('webm') ? 'webm' : 
-                           recording.blob.type.includes('wav') ? 'wav' : 
-                           'm4a'; // default to m4a
+      const fileExtension = recording.blob.type === 'text/vtt'
+        ? 'vtt'
+        : getAudioFileExtension(recording.blob.type) ?? 'm4a';
       const fileName = recording.metadata.fileName ||
         `queued-recording-${recording.metadata.timestamp}.${fileExtension}`;
 
-      let file = new File(
+      let file = normalizeAudioFilename(new File(
         [recording.blob],
         fileName,
         { type: recording.blob.type || (fileName.toLowerCase().endsWith('.vtt') ? 'text/vtt' : 'audio/mp4') }
-      );
+      ));
+      const sourceMimeType = file.type;
+      const conversionMetadata: AudioFfmpegMetadata = {};
 
       // Convert audio/video to WAV for backend processing (happens here when back online)
       if (!file.name.toLowerCase().endsWith('.vtt') &&
@@ -99,8 +102,11 @@ export async function startSync(): Promise<SyncResult> {
             setIsConverting: () => {},
             setConversionProgress: () => {},
             setConversionStep: () => {},
+            onMetadata: (meta) => { Object.assign(conversionMetadata, meta); },
           });
-          console.log('[sync-service] WAV conversion successful:', recording.id, {
+          console.log('[sync-service] Audio prepared for upload:', recording.id, {
+            mimeType: file.type,
+            convertedToWav: conversionMetadata.convertedToWav === true,
             newSizeMB: (file.size / (1024 * 1024)).toFixed(2)
           });
         } catch (conversionError) {
@@ -110,6 +116,27 @@ export async function startSync(): Promise<SyncResult> {
         }
       }
 
+      const uploadMetadata = recording.metadata.uploadMetadata;
+      let actualUploadMetadata = uploadMetadata;
+      if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
+        const settings: RecordingSettings = {
+          ...uploadMetadata?.recording_settings,
+          source_mime_type: uploadMetadata?.recording_settings?.source_mime_type ?? sourceMimeType,
+          mime_type: file.type,
+        };
+        if (conversionMetadata.convertedToWav === true) {
+          settings.sample_rate_hz = 16000;
+          settings.channels = 1;
+          settings.codec = 'pcm_s16le';
+          delete settings.bitrate_kbps;
+        } else if (getAudioFileExtension(file.type) !== 'wav' && settings.codec === 'pcm_s16le') {
+          delete settings.codec;
+          delete settings.sample_rate_hz;
+          delete settings.channels;
+        }
+        actualUploadMetadata = { ...uploadMetadata, recording_settings: settings };
+      }
+
       // Upload using the existing API
       const response = await uploadFile(
         file,
@@ -117,7 +144,7 @@ export async function startSync(): Promise<SyncResult> {
         recording.metadata.subcategoryId,
         recording.metadata.preSessionData,
         undefined,
-        recording.metadata.uploadMetadata
+        actualUploadMetadata
       );
 
       console.log('[sync-service] Upload successful:', recording.id, response);

@@ -1,10 +1,11 @@
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlparse
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 import asyncio
 import re
 from ...core.logging import get_logger
 from ...repositories.jobs import JobRepository
+from ...models.job_status import LIST_STATUS_GROUPS
 from ..storage.blob_service import StorageService
 from ..prompts.prompt_store import PromptStore
 from ...utils.cache_utils import TTLCache
@@ -84,6 +85,7 @@ class JobService:
             job["text_content"] = updated_text
 
         job["updated_at"] = datetime.now(UTC).isoformat()
+        job["transcription_revision"] = job["updated_at"]
         await self.repository.replace(job["id"], job)
         await invalidate_job_cache(job["id"])
         return updated_text
@@ -98,6 +100,22 @@ class JobService:
         updated_job = await self.repository.replace(job["id"], job)
         await invalidate_job_cache(job["id"])
         return updated_job
+
+    async def get_teams_import_summaries(self, current_user: Dict[str, Any]) -> List[Dict[str, Any]]:
+        # One small owner-scoped projection, without signing URLs or reading job content.
+        # Legacy Teams imports used a deterministic dated VTT/recording filename.
+        where_sql, params = self._compose_query_where_params(
+            user_id=current_user.get("id"), job_id=None,
+            created_at_start=(datetime.now(UTC) - timedelta(days=90)).isoformat(),
+        )
+        return await self.repository.query(
+            "SELECT c.id, c.teams_event_id, c.source, c.file_name, c.filename, c.displayname, c.display_name, c.status, "
+            "c.created_at, c.updated_at FROM c WHERE " + where_sql +
+            " AND (c.source.kind = 'teams' OR IS_STRING(c.teams_event_id) OR ENDSWITH(c.file_name, '.vtt', true) "
+            "OR ENDSWITH(c.file_name, '.wav', true) OR ENDSWITH(c.file_name, '.mp4', true)) "
+            "ORDER BY c.created_at DESC",
+            params,
+        )
 
     async def get_jobs_with_filters(
         self,
@@ -121,10 +139,10 @@ class JobService:
         # Project only the fields needed by list/detail cards to reduce RU usage and payload size.
         data_query = (
             "SELECT c.id, c.type, c.user_id, c.user_email, c.status, c.created_at, c.updated_at, "
-            "c.deleted, c.displayname, c.file_name, c.file_path, c.transcription_file_path, "
+            "c.deleted, c.displayname, c.display_name, c.file_name, c.filename, c.file_path, c.transcription_file_path, "
             "c.analysis_file_path, c.analysis_attempts, c.prompt_category_id, c.prompt_subcategory_id, "
             "c.shared_with, c.upload_method, c.file_size_bytes, c.audio_duration_seconds, "
-            "c.audio_duration_minutes, c.analysis_started_at, c.analysis_completed_at, c._ts, c.ttl "
+            "c.audio_duration_minutes, c.analysis_started_at, c.analysis_completed_at, c.teams_event_id, c.source, c.transcription_revision, c._ts, c.ttl "
             f"FROM c WHERE {where_sql} ORDER BY c.created_at DESC OFFSET @offset LIMIT @limit"
         )
         count_query = f"SELECT VALUE COUNT(1) FROM c WHERE {where_sql}"
@@ -193,7 +211,12 @@ class JobService:
             )
             params.append({"name": "@search", "value": search.strip()})
 
-        if status:
+        if status in {"processing", "failed"}:
+            values = LIST_STATUS_GROUPS[status]
+            placeholders = [f"@status_{index}" for index in range(len(values))]
+            where_clauses.append(f"c.status IN ({', '.join(placeholders)})")
+            params.extend({"name": name, "value": value} for name, value in zip(placeholders, values))
+        elif status and status != "all":
             where_clauses.append("c.status = @status")
             params.append({"name": "@status", "value": status})
 

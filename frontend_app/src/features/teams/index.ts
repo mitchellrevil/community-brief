@@ -6,6 +6,7 @@ export {
   getRecentTeamsMeetings,
   getTeamsAccessRequestUrl,
   getTeamsGraphErrorMessage,
+  mediaFilename,
 } from "./data/api";
 export type {
   TeamsMeeting,

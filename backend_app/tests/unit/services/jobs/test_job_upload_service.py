@@ -68,6 +68,8 @@ async def test_create_job_from_upload_saves_file_creates_job_and_tracks_analytic
         assert owner_user == current_user
         assert metadata["prompt_category_id"] == "cat-1"
         assert metadata["pre_session_form_data"] == {"client": "web"}
+        assert metadata["teams_event_id"] == "calendar-event-1"
+        assert metadata["source"] == {"kind": "teams", "event_id": "calendar-event-1"}
         return {
             "id": "job-123",
             "status": "uploaded",
@@ -82,6 +84,7 @@ async def test_create_job_from_upload_saves_file_creates_job_and_tracks_analytic
         current_user=current_user,
         prompt_category_id="cat-1",
         pre_session_form_data='{"client":"web"}',
+        teams_event_id="calendar-event-1",
     )
 
     await asyncio.sleep(0.01)

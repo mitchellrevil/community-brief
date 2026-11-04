@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Annotated, Any, Dict, Optional
 from fastapi import APIRouter, Depends, File, Form, Query, UploadFile
 from fastapi.responses import JSONResponse, StreamingResponse
 
@@ -15,6 +15,7 @@ from ....schemas.jobs import (
     AnalysisDocumentUpdateRequest,
     JobUpdateRequest,
     SpeakerNamesUpdateRequest,
+    TeamsImportSummary,
 )
 from ....schemas.uploads import RecordingConsentEvidenceRequest
 from ....services.jobs.job_service import JobService
@@ -55,6 +56,14 @@ async def get_jobs(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/jobs/teams-imports", response_model=list[TeamsImportSummary])
+async def get_teams_imports(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+    job_svc: JobService = Depends(get_job_service),
+) -> list[Dict[str, Any]]:
+    return await job_svc.get_teams_import_summaries(current_user)
 
 
 @router.get("/jobs/{job_id}")
@@ -155,6 +164,7 @@ async def create_job(
     prompt_subcategory_id: Optional[str] = Form(None),
     pre_session_form_data: Optional[str] = Form(None),
     recording_consent: Optional[str] = Form(None),
+    teams_event_id: Annotated[Optional[str], Form(min_length=1, max_length=2048)] = None,
     current_user: Dict[str, Any] = Depends(get_current_user),
     job_upload_service: JobUploadService = Depends(get_job_upload_service),
 ):
@@ -164,6 +174,7 @@ async def create_job(
         prompt_category_id=prompt_category_id,
         prompt_subcategory_id=prompt_subcategory_id,
         pre_session_form_data=pre_session_form_data,
+        teams_event_id=teams_event_id,
         recording_consent=(
             RecordingConsentEvidenceRequest.model_validate_json(recording_consent).model_dump(mode="json")
             if recording_consent

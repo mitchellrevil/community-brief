@@ -8,6 +8,7 @@ import {
   Search,
   X,
 } from "lucide-react";
+import type { AudioListValues } from "@/shared/schema/audio-list.schema";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -27,7 +28,7 @@ interface AudioRecordingsFiltersProps {
   search: string;
   onSearchChange: (value: string) => void;
   status: string;
-  onStatusChange: (value: string) => void;
+  onStatusChange: (value: NonNullable<AudioListValues["status"]>) => void;
   createdAtStart?: string;
   createdAtEnd?: string;
   onCreatedAtStartChange: (value?: string) => void;

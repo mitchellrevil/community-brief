@@ -26,6 +26,7 @@ export interface RecordingConsentEvidence {
 export const RECORDING_CONSENT_POLICY_VERSION = "recording-disclaimer-v1";
 
 export interface AudioUploadMetadata {
+  teams_event_id?: string;
   audio_duration_seconds?: number;
   audio_duration_minutes?: number;
   recording_settings?: RecordingSettings;

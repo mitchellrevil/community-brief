@@ -11,6 +11,7 @@ Pure unit tests for file utility functions including:
 import pytest
 import os
 import tempfile
+import wave
 from datetime import datetime, timedelta
 from unittest.mock import patch, MagicMock
 
@@ -82,6 +83,58 @@ class TestGetExtension:
 
 class TestValidateAudioFile:
     """Tests for FileUtils.validate_audio_file method."""
+
+    def test_accepts_untagged_wav_with_webm_filename(self, tmp_path):
+        from app.utils.file_utils import FileUtils, MutagenFile
+
+        upload = tmp_path / "recording.webm"
+        with wave.open(str(upload), "wb") as recording:
+            recording.setnchannels(1)
+            recording.setsampwidth(2)
+            recording.setframerate(16000)
+            recording.writeframes(b"\x00\x00" * 160)
+
+        audio = MutagenFile(str(upload))
+        assert audio is not None
+        assert audio.info is not None
+        assert not audio  # Mutagen truthiness reflects tags, not audio recognition.
+        assert FileUtils.validate_upload_file(str(upload))[0] is True
+
+    @pytest.mark.parametrize("header,extension", [
+        (b"\x00\x00\x00\x18ftypM4A ", "m4a"),
+        (b"\x1a\x45\xdf\xa3", "webm"),
+    ])
+    @pytest.mark.parametrize("marker", [b"exec(", b"<script", b"MZ\x90\x00"])
+    def test_accepts_incidental_text_patterns_in_binary_audio(self, tmp_path, header, extension, marker):
+        from app.utils.file_utils import FileUtils
+
+        upload = tmp_path / f"recording.{extension}"
+        upload.write_bytes(header + b"\x00" * (64 * 1024) + marker)
+
+        assert FileUtils.validate_upload_file(str(upload))[0] is True
+
+    @pytest.mark.parametrize("content", [b"<script>alert(1)</script>", b"MZ\x90\x00" + b"\x00" * 128])
+    def test_rejects_non_audio_content_with_webm_filename(self, tmp_path, content):
+        from app.utils.file_utils import FileUtils
+
+        upload = tmp_path / "recording.webm"
+        upload.write_bytes(content)
+
+        assert FileUtils.validate_upload_file(str(upload))[0] is False
+
+    @pytest.mark.parametrize("filename,header", [
+        ("notes.txt", b"notes "),
+        ("meeting.vtt", b"WEBVTT\n"),
+        ("report.pdf", b"%PDF-1.4\n"),
+        ("report.docx", b"PK\x03\x04"),
+    ])
+    def test_keeps_dangerous_pattern_checks_for_non_audio(self, tmp_path, filename, header):
+        from app.utils.file_utils import FileUtils
+
+        upload = tmp_path / filename
+        upload.write_bytes(header + b"exec(untrusted)")
+
+        assert FileUtils.validate_upload_file(str(upload))[0] is False
     
     def test_validates_wav_file(self, tmp_path):
         """Given valid wav file, when validating, then returns True."""

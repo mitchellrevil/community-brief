@@ -22,7 +22,7 @@ import { recordingsKeys } from "@/features/recordings/data/keys";
 
 function sortAudioRecordings(data: Array<AudioRecording>) {
   if (!Array.isArray(data)) return [];
-  return data.sort(
+  return [...data].sort(
     (a, b) =>
       new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   );
@@ -105,9 +105,9 @@ export function getAudioRecordingQuery(id: string) {
   });
 }
 
-export function getAudioTranscriptionQuery(id: string) {
+export function getAudioTranscriptionQuery(id: string, version?: { revision?: string; status: string }) {
   return queryOptions({
-    queryKey: recordingsKeys.transcription(id),
+    queryKey: version ? [...recordingsKeys.transcription(id), version] : recordingsKeys.transcription(id),
     queryFn: () => getAudioTranscription(id),
     enabled: !!id,
     retry: (failureCount, error: any) => {
@@ -234,6 +234,7 @@ export function useUpdateTranscriptionSpeakerNamesMutation() {
     }) => updateTranscriptionSpeakerNames(jobId, speakerNames),
     onSuccess: (data, variables) => {
       queryClient.setQueryData(recordingsKeys.transcription(variables.jobId), data.transcription);
+      queryClient.setQueriesData({ queryKey: recordingsKeys.transcription(variables.jobId) }, data.transcription);
       queryClient.invalidateQueries({ queryKey: recordingsKeys.single(variables.jobId) });
       queryClient.invalidateQueries({ queryKey: recordingsKeys.base() });
     },

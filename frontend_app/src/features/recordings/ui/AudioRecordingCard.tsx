@@ -11,7 +11,10 @@ import {
   Share2,
   Trash2,
 } from "lucide-react";
+import { getTeamsEventId } from "../data/recording-source";
+import { normalizeRecordingStatus } from "../data/recording-status";
 import type { ReactNode } from "react";
+import type { RecordingSummary } from "../data/file-entry";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -33,42 +36,12 @@ import { formatDateTime, formatDuration, parseDate } from "@/lib/date-utils";
 import { getDisplayName } from "@/lib/display-name-utils";
 import { cn } from "@/lib/utils";
 
+
 export type RecordingCardLayout = "card" | "list";
 export type RecordingDetailsSource = "files" | "shared" | "all-files";
 
-type RecordingStatus =
-  | "completed"
-  | "processing"
-  | "uploaded"
-  | "pending"
-  | "transcribing"
-  | "transcribed"
-  | "analysing"
-  | "failed"
-  | "error"
-  | "queued"
-  | "default";
-
-type RecordingTimestamp = string | number | null | undefined;
-
 export interface AudioRecordingCardProps {
-  recording: {
-    id: string;
-    displayname?: string;
-    display_name?: string;
-    file_name?: string;
-    filename?: string;
-    file_path?: string;
-    status?: RecordingStatus | string;
-    created_at?: RecordingTimestamp;
-    updated_at?: RecordingTimestamp;
-    audio_duration_seconds?: number | null;
-    user_id?: string;
-    user_email?: string;
-    _ts?: number;
-    ttl?: number | null;
-    _isQueued?: boolean;
-  };
+  recording: RecordingSummary;
   layout?: RecordingCardLayout;
   isEditable?: boolean;
   ownerLabel?: string;
@@ -128,8 +101,8 @@ const AudioRecordingCardComponent = ({
     updatedDate &&
     (!createdDate || updatedDate.getTime() >= createdDate.getTime()),
   );
-  const status = normalizeStatus(recording.status);
-  const isQueued = recording._isQueued || status === "queued";
+  const status = normalizeRecordingStatus(recording.status);
+  const isQueued = status === "queued";
   const canRetry =
     Boolean(onRetryProcessing) &&
     !isQueued &&
@@ -161,7 +134,10 @@ const AudioRecordingCardComponent = ({
         status === "transcribing"
       }
     >
-      {statusLabel}
+      {statusLabel ??
+        (getTeamsEventId(recording) && status === "completed"
+          ? "Processed"
+          : undefined)}
     </StatusBadge>
   );
 
@@ -177,6 +153,7 @@ const AudioRecordingCardComponent = ({
         </span>
       )}
       {ownerLabel && <ContextLabel label={ownerLabel} />}
+      {getTeamsEventId(recording) && <ContextLabel label="Microsoft Teams" />}
       {sharingLabel && <ContextLabel label={sharingLabel} />}
       {retryPending && (
         <span className="text-muted-foreground text-xs">Retrying...</span>
@@ -330,27 +307,6 @@ const AudioRecordingCardComponent = ({
     </Card>
   );
 };
-
-function normalizeStatus(status: string | undefined): RecordingStatus {
-  const knownStatuses: Array<RecordingStatus> = [
-    "completed",
-    "processing",
-    "uploaded",
-    "pending",
-    "transcribing",
-    "transcribed",
-    "analysing",
-    "failed",
-    "error",
-    "queued",
-    "default",
-  ];
-
-  const normalizedStatus = status?.toLowerCase() as RecordingStatus | undefined;
-  return normalizedStatus && knownStatuses.includes(normalizedStatus)
-    ? normalizedStatus
-    : "default";
-}
 
 function ContextLabel({ label }: { label: string }) {
   return (
@@ -570,33 +526,4 @@ function RecordingActions({
   );
 }
 
-export const AudioRecordingCard = memo(
-  AudioRecordingCardComponent,
-  (prevProps, nextProps) => {
-    return (
-      prevProps.recording.id === nextProps.recording.id &&
-      prevProps.recording.status === nextProps.recording.status &&
-      prevProps.recording.displayname === nextProps.recording.displayname &&
-      prevProps.recording.display_name === nextProps.recording.display_name &&
-      prevProps.recording.file_name === nextProps.recording.file_name &&
-      prevProps.recording.created_at === nextProps.recording.created_at &&
-      prevProps.recording.updated_at === nextProps.recording.updated_at &&
-      prevProps.recording.audio_duration_seconds ===
-        nextProps.recording.audio_duration_seconds &&
-      prevProps.recording._ts === nextProps.recording._ts &&
-      prevProps.recording.ttl === nextProps.recording.ttl &&
-      prevProps.layout === nextProps.layout &&
-      prevProps.ownerLabel === nextProps.ownerLabel &&
-      prevProps.accessLabel === nextProps.accessLabel &&
-      prevProps.sharingLabel === nextProps.sharingLabel &&
-      prevProps.message === nextProps.message &&
-      prevProps.retryPending === nextProps.retryPending &&
-      prevProps.className === nextProps.className &&
-      prevProps.isEditable === nextProps.isEditable &&
-      prevProps.primaryAction === nextProps.primaryAction &&
-      prevProps.statusLabel === nextProps.statusLabel &&
-      prevProps.durationDescription === nextProps.durationDescription &&
-      prevProps.metadataItems === nextProps.metadataItems
-    );
-  },
-);
+export const AudioRecordingCard = memo(AudioRecordingCardComponent);

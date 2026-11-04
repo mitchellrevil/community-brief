@@ -59,7 +59,7 @@ describe("useMicrosoftGraphToken", () => {
     );
 
     await waitFor(() => expect(result.current.accessToken).toBe("teams-token"));
-    expect(result.current).toEqual({
+    expect(result.current).toMatchObject({
       accessToken: "teams-token",
       isLoading: false,
       error: null,
@@ -82,6 +82,33 @@ describe("useMicrosoftGraphToken", () => {
     expect(result.current.accessToken).toBeNull();
     expect(result.current.error).toBeNull();
     expect(mocks.acquireTokenSilent).not.toHaveBeenCalled();
+  });
+
+  it("shares simultaneous forced renewals for the same account and scopes", async () => {
+    mocks.acquireTokenSilent.mockResolvedValueOnce({
+      accessToken: "initial-token",
+    });
+    const { result } = renderHook(() =>
+      useMicrosoftGraphToken(teamsGraphScopes),
+    );
+    await waitFor(() =>
+      expect(result.current.accessToken).toBe("initial-token"),
+    );
+    let resolveRefresh!: (result: { accessToken: string }) => void;
+    mocks.acquireTokenSilent.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        }),
+    );
+    const first = result.current.getAccessToken({ forceRefresh: true });
+    const second = result.current.getAccessToken({ forceRefresh: true });
+    expect(mocks.acquireTokenSilent).toHaveBeenCalledTimes(2);
+    resolveRefresh({ accessToken: "renewed-token" });
+    expect(await Promise.all([first, second])).toEqual([
+      "renewed-token",
+      "renewed-token",
+    ]);
   });
 
   it("exposes an actionable consent error", async () => {

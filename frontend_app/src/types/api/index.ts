@@ -1,12 +1,12 @@
 /**
  * API Type Definitions
- * 
+ *
  * Central export for all API-related TypeScript types.
  * Import from '@/types/api' for shared types across the frontend.
  */
 
 // Common types
-export type { PaginatedResponse } from './common';
+export type { PaginatedResponse } from "./common";
 
 // Analytics types
 export type {
@@ -28,13 +28,14 @@ export type {
   UserSessionDurationResponse,
   AnalyticsEventRequest,
   AnalyticsEventResponse,
-} from './analytics';
+} from "./analytics";
 
 // Audio recordings types
 export type {
   AnalysisAttempt,
   JobStatus,
   AudioRecording,
+  TeamsJobSource,
   UploadResponse,
   JobDeleteResponse,
   DeletedJobsAdminResponse,
@@ -49,4 +50,4 @@ export type {
   RefinementHistoryResponse,
   ReprocessRequest,
   ReprocessResponse,
-} from './audio-recordings';
+} from "./audio-recordings";

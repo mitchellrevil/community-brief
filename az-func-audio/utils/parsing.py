@@ -7,11 +7,7 @@ def strip_vtt_tags(line: str) -> str:
 
 def extract_vtt_speaker(line: str, current_speaker: Optional[str] = None) -> Tuple[Optional[str], str]:
     """Extract speaker name from a VTT line, if present."""
-    if '<v ' in line and '>' in line:
-        start_tag = line.find('<v ')
-        end_tag = line.find('>', start_tag)
-        if end_tag != -1:
-            speaker = line[start_tag + 3:end_tag].strip()
-            clean_line = line[end_tag + 1:].strip()
-            return speaker, clean_line
+    voice = re.search(r"<v(?:\.[^\s>]+)*\s+([^>]+)>", line, re.IGNORECASE)
+    if voice:
+        return voice.group(1).strip(), line[voice.end():].strip()
     return None, line

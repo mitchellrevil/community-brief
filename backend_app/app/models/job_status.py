@@ -50,6 +50,12 @@ IN_PROGRESS_STATUSES: Set[str] = {
     ANALYSING,
 }
 
+# Files filters group persisted lifecycle states without changing stored statuses.
+LIST_STATUS_GROUPS = {
+    "processing": ("processing", "pending", TRANSCRIBING, TRANSCRIBED, ANALYSING),
+    "failed": (FAILED, ERROR),
+}
+
 
 def is_valid_status(status: str) -> bool:
     """Check if a status value is in the canonical set."""

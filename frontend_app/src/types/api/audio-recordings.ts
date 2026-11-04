@@ -35,10 +35,18 @@ export type JobStatus =
   | "error"
   | "failed";
 
+export interface TeamsJobSource {
+  kind: "teams";
+  event_id: string;
+}
+
 /**
  * Audio recording/job entity
  */
 export interface AudioRecording {
+  source?: TeamsJobSource;
+  transcription_revision?: string;
+  teams_event_id?: string;
   id: string;
   user_id: string;
   file_path: string;

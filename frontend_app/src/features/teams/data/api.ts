@@ -1,8 +1,16 @@
+import type { GraphAccessToken } from "@/shared/api/graph-client";
 import type {
   TeamsMeeting,
   TeamsTranscript,
   TeamsTranscriptBundle,
 } from "./types";
+import {
+  MicrosoftGraphError as TeamsGraphError,
+  graphRequest,
+} from "@/shared/api/graph-client";
+
+
+export { MicrosoftGraphError as TeamsGraphError } from "@/shared/api/graph-client";
 
 const GRAPH_ROOT = "https://graph.microsoft.com/v1.0";
 const UNATTRIBUTED_TRANSCRIPT_TYPE =
@@ -43,81 +51,23 @@ interface GraphRecording {
   createdDateTime?: string;
 }
 
-interface GraphErrorPayload {
-  error?: {
-    code?: string;
-    message?: string;
-    innerError?: { code?: string };
-  };
-}
-
-export class TeamsGraphError extends Error {
-  constructor(
-    message: string,
-    readonly code: string,
-    readonly status: number,
-  ) {
-    super(message);
-    this.name = "TeamsGraphError";
-  }
-}
-
-function assertGraphUrl(url: string): void {
-  if (new URL(url).origin !== new URL(GRAPH_ROOT).origin) {
-    throw new TeamsGraphError(
-      "Microsoft Graph returned an invalid URL.",
-      "InvalidGraphUrl",
-      502,
-    );
-  }
-}
-
-async function graphRequest(
-  url: string,
-  accessToken: string,
-  init?: RequestInit,
-): Promise<Response> {
-  assertGraphUrl(url);
-  const headers = new Headers(init?.headers);
-  headers.set("Authorization", `Bearer ${accessToken}`);
-  if (!headers.has("Accept")) headers.set("Accept", "application/json");
-
-  const response = await fetch(url, { ...init, headers });
-  if (response.ok) return response;
-
-  let payload: GraphErrorPayload | null = null;
-  try {
-    payload = await response.json();
-  } catch {
-    // Graph occasionally returns an empty or non-JSON gateway response.
-  }
-
-  const code =
-    response.status === 429
-      ? "TooManyRequests"
-      : payload?.error?.innerError?.code ||
-        payload?.error?.code ||
-        "GraphRequestFailed";
-  throw new TeamsGraphError(
-    payload?.error?.message ||
-      `Microsoft Graph request failed (${response.status}).`,
-    code,
-    response.status,
-  );
-}
-
 async function getAllGraphPages<T>(
   initialUrl: string,
-  accessToken: string,
+  accessToken: GraphAccessToken,
   headers?: HeadersInit,
+  options?: { signal?: AbortSignal; onValues?: (values: Array<T>) => void },
 ): Promise<Array<T>> {
   const values: Array<T> = [];
   let nextUrl: string | undefined = initialUrl;
 
   while (nextUrl) {
-    const response = await graphRequest(nextUrl, accessToken, { headers });
+    const response = await graphRequest(nextUrl, accessToken, {
+      headers,
+      signal: options?.signal,
+    });
     const page = (await response.json()) as GraphPage<T>;
     values.push(...(page.value ?? []));
+    options?.onValues?.([...values]);
     nextUrl = page["@odata.nextLink"];
   }
 
@@ -153,14 +103,15 @@ export function getTeamsAccessRequestUrl(meeting: TeamsMeeting): string | null {
   return `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 }
 
-async function getMeetingMedia(
-  accessToken: string,
+export async function getMeetingMedia(
+  accessToken: GraphAccessToken,
   meeting: TeamsMeeting,
-  recordingAccessToken: string | null,
+  recordingAccessToken: GraphAccessToken | null,
+  signal?: AbortSignal,
 ): Promise<TeamsMeeting | null> {
   let onlineMeeting: GraphOnlineMeeting;
   try {
-    onlineMeeting = await resolveOnlineMeeting(accessToken, meeting);
+    onlineMeeting = await resolveOnlineMeeting(accessToken, meeting, signal);
   } catch (error) {
     if (error instanceof TeamsGraphError && error.status === 404) return null;
     if (isMeetingAccessDenied(error))
@@ -174,7 +125,7 @@ async function getMeetingMedia(
   }
 
   const [transcriptResult] = await Promise.allSettled([
-    listMeetingTranscripts(accessToken, onlineMeeting.id),
+    listMeetingTranscripts(accessToken, onlineMeeting.id, signal),
   ]);
   const transcriptIds =
     transcriptResult.status === "fulfilled"
@@ -187,7 +138,7 @@ async function getMeetingMedia(
   // Doing it for every card delays the whole first page and repeats large Graph reads.
   const [recordingResult] = await Promise.allSettled([
     !transcriptIds.length && recordingAccessToken
-      ? listMeetingRecordings(recordingAccessToken, onlineMeeting.id)
+      ? listMeetingRecordings(recordingAccessToken, onlineMeeting.id, signal)
       : Promise.resolve([]),
   ]);
   const recordingIds =
@@ -241,25 +192,33 @@ function calendarEventToMeeting(
     !endDateTime ||
     Date.parse(startDateTime) < start.getTime() ||
     Date.parse(endDateTime) > now.getTime()
-  ) return null;
+  )
+    return null;
 
   const email = event.organizer?.emailAddress;
   return {
     id: event.id,
     subject: event.subject?.trim() || "Teams meeting",
-    organizer: email?.name?.trim() || email?.address?.trim() || "Unknown organiser",
+    organizer:
+      email?.name?.trim() || email?.address?.trim() || "Unknown organiser",
     startDateTime,
     endDateTime,
     joinUrl,
-    createdDateTime: parseUtcDateTime({ dateTime: event.createdDateTime }) ?? undefined,
-    lastModifiedDateTime: parseUtcDateTime({ dateTime: event.lastModifiedDateTime }) ?? undefined,
+    createdDateTime:
+      parseUtcDateTime({ dateTime: event.createdDateTime }) ?? undefined,
+    lastModifiedDateTime:
+      parseUtcDateTime({ dateTime: event.lastModifiedDateTime }) ?? undefined,
     organizerEmail: email?.address?.trim(),
   };
 }
 
 export async function getRecentTeamsMeetingCandidates(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   now = new Date(),
+  options?: {
+    signal?: AbortSignal;
+    onMeetings?: (meetings: Array<TeamsMeeting>) => void;
+  },
 ): Promise<Array<TeamsMeeting>> {
   const start = new Date(now);
   start.setUTCDate(start.getUTCDate() - 90);
@@ -271,72 +230,102 @@ export async function getRecentTeamsMeetingCandidates(
     "$select",
     "id,subject,start,end,createdDateTime,lastModifiedDateTime,isCancelled,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,organizer",
   );
-  url.searchParams.set("$top", "1000");
+  url.searchParams.set("$top", "100");
+  url.searchParams.set("$orderby", "start/dateTime desc");
+
+  const toMeetings = (events: Array<GraphCalendarEvent>) =>
+    events
+      .flatMap((event) => {
+        const meeting = calendarEventToMeeting(event, start, now);
+        return meeting ? [meeting] : [];
+      })
+      .sort(
+        (left, right) =>
+          Date.parse(right.startDateTime) - Date.parse(left.startDateTime),
+      );
 
   const events = await getAllGraphPages<GraphCalendarEvent>(
     url.toString(),
     accessToken,
     { Prefer: 'outlook.timezone="UTC"' },
+    {
+      signal: options?.signal,
+      onValues: (values) => options?.onMeetings?.(toMeetings(values)),
+    },
   );
 
-  return events
-    .flatMap((event): Array<TeamsMeeting> => {
-      const meeting = calendarEventToMeeting(event, start, now);
-      return meeting ? [meeting] : [];
-    })
-    .sort(
-      (left, right) =>
-        Date.parse(right.startDateTime) - Date.parse(left.startDateTime),
-    );
+  return toMeetings(events);
 }
 
 export async function getTeamsMeetingById(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   eventId: string,
-  recordingAccessToken: string | null = accessToken,
+  recordingAccessToken: GraphAccessToken | null = accessToken,
   now = new Date(),
 ): Promise<TeamsMeeting | null> {
   const start = new Date(now);
   start.setUTCDate(start.getUTCDate() - 90);
   const url = new URL(`${GRAPH_ROOT}/me/events/${encodeURIComponent(eventId)}`);
-  url.searchParams.set("$select", "id,subject,start,end,createdDateTime,lastModifiedDateTime,isCancelled,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,organizer");
+  url.searchParams.set(
+    "$select",
+    "id,subject,start,end,createdDateTime,lastModifiedDateTime,isCancelled,isOnlineMeeting,onlineMeeting,onlineMeetingProvider,organizer",
+  );
   const response = await graphRequest(url.toString(), accessToken);
-  const meeting = calendarEventToMeeting((await response.json()) as GraphCalendarEvent, start, now);
-  return meeting ? getMeetingMedia(accessToken, meeting, recordingAccessToken) : null;
+  const meeting = calendarEventToMeeting(
+    (await response.json()) as GraphCalendarEvent,
+    start,
+    now,
+  );
+  return meeting
+    ? getMeetingMedia(accessToken, meeting, recordingAccessToken)
+    : null;
 }
 
 export async function getTeamsMeetingsPage(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   candidates: Array<TeamsMeeting>,
   offset: number,
   pageSize = 8,
-  recordingAccessToken: string | null = accessToken,
+  recordingAccessToken: GraphAccessToken | null = accessToken,
 ): Promise<{ meetings: Array<TeamsMeeting>; nextOffset: number | null }> {
   const selected = candidates.slice(offset, offset + pageSize);
   const available: Array<TeamsMeeting> = [];
   for (let index = 0; index < selected.length; index += 4) {
     const batch = await Promise.all(
-      selected.slice(index, index + 4).map((meeting) =>
-        getMeetingMedia(accessToken, meeting, recordingAccessToken),
-      ),
+      selected
+        .slice(index, index + 4)
+        .map((meeting) =>
+          getMeetingMedia(accessToken, meeting, recordingAccessToken),
+        ),
     );
-    available.push(...batch.filter((meeting): meeting is TeamsMeeting => meeting !== null));
+    available.push(
+      ...batch.filter((meeting): meeting is TeamsMeeting => meeting !== null),
+    );
   }
   const nextOffset = offset + selected.length;
-  return { meetings: available, nextOffset: nextOffset < candidates.length ? nextOffset : null };
+  return {
+    meetings: available,
+    nextOffset: nextOffset < candidates.length ? nextOffset : null,
+  };
 }
 
 export async function getRecentTeamsMeetings(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   now = new Date(),
-  recordingAccessToken: string | null = accessToken,
+  recordingAccessToken: GraphAccessToken | null = accessToken,
 ): Promise<Array<TeamsMeeting>> {
   const candidates = await getRecentTeamsMeetingCandidates(accessToken, now);
 
   const available: Array<TeamsMeeting> = [];
   let offset: number | null = 0;
   while (offset !== null) {
-    const page = await getTeamsMeetingsPage(accessToken, candidates, offset, 8, recordingAccessToken);
+    const page = await getTeamsMeetingsPage(
+      accessToken,
+      candidates,
+      offset,
+      8,
+      recordingAccessToken,
+    );
     available.push(...page.meetings);
     offset = page.nextOffset;
   }
@@ -344,8 +333,9 @@ export async function getRecentTeamsMeetings(
 }
 
 async function resolveOnlineMeeting(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   meeting: TeamsMeeting,
+  signal?: AbortSignal,
 ): Promise<GraphOnlineMeeting> {
   const url = new URL(`${GRAPH_ROOT}/me/onlineMeetings`);
   url.searchParams.set(
@@ -353,7 +343,7 @@ async function resolveOnlineMeeting(
     `JoinWebUrl eq '${escapeODataString(meeting.joinUrl)}'`,
   );
 
-  const response = await graphRequest(url.toString(), accessToken);
+  const response = await graphRequest(url.toString(), accessToken, { signal });
   const page = (await response.json()) as GraphPage<GraphOnlineMeeting>;
   const onlineMeeting =
     page.value?.find((candidate) => candidate.joinWebUrl === meeting.joinUrl) ??
@@ -369,11 +359,17 @@ async function resolveOnlineMeeting(
 }
 
 async function listMeetingTranscripts(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   meetingId: string,
+  signal?: AbortSignal,
 ): Promise<Array<TeamsTranscript>> {
   const url = `${GRAPH_ROOT}/me/onlineMeetings/${encodeURIComponent(meetingId)}/transcripts`;
-  const transcripts = await getAllGraphPages<GraphTranscript>(url, accessToken);
+  const transcripts = await getAllGraphPages<GraphTranscript>(
+    url,
+    accessToken,
+    undefined,
+    { signal },
+  );
 
   return transcripts
     .filter((transcript) => Boolean(transcript.id))
@@ -390,11 +386,17 @@ async function listMeetingTranscripts(
 }
 
 async function listMeetingRecordings(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   meetingId: string,
+  signal?: AbortSignal,
 ): Promise<Array<GraphRecording>> {
   const url = `${GRAPH_ROOT}/me/onlineMeetings/${encodeURIComponent(meetingId)}/recordings`;
-  const recordings = await getAllGraphPages<GraphRecording>(url, accessToken);
+  const recordings = await getAllGraphPages<GraphRecording>(
+    url,
+    accessToken,
+    undefined,
+    { signal },
+  );
   return recordings
     .filter((recording) => Boolean(recording.id))
     .sort(
@@ -405,7 +407,7 @@ async function listMeetingRecordings(
 }
 
 async function downloadTranscriptSegment(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   meetingId: string,
   transcriptId: string,
 ): Promise<{ content: string; hasSpeakerAttribution: boolean }> {
@@ -416,7 +418,10 @@ async function downloadTranscriptSegment(
       headers: { Accept: "text/vtt" },
     });
     const content = await response.text();
-    return { content, hasSpeakerAttribution: /<v\s+[^>]+>/i.test(content) };
+    return {
+      content,
+      hasSpeakerAttribution: /<v(?:\.[^\s>]+)*\s+[^>]+>/i.test(content),
+    };
   } catch (error) {
     if (
       !(error instanceof TeamsGraphError) ||
@@ -434,15 +439,20 @@ async function downloadTranscriptSegment(
 
 export function combineVttSegments(segments: Array<string>): string {
   const cues: Array<string> = [];
-  const cueTiming = /^(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}\s+-->\s+(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}/;
+  const cueTiming =
+    /^(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}\s+-->\s+(?:\d{2}:)?\d{2}:\d{2}[.,]\d{3}/;
   for (const segment of segments) {
-    const blocks = segment.replace(/^\uFEFF/, "").replace(/\r\n?/g, "\n").split(/\n\s*\n/);
+    const blocks = segment
+      .replace(/^\uFEFF/, "")
+      .replace(/\r\n?/g, "\n")
+      .split(/\n\s*\n/);
     for (const block of blocks) {
       const lines = block.split("\n").map((line) => line.trim());
       const timingIndex = lines.findIndex((line) => cueTiming.test(line));
       if (timingIndex < 0) continue;
       const payload = lines.slice(timingIndex + 1).filter(Boolean);
-      if (payload.length) cues.push([lines[timingIndex], ...payload].join("\n"));
+      if (payload.length)
+        cues.push([lines[timingIndex], ...payload].join("\n"));
     }
   }
   return `WEBVTT\n\n${cues.join("\n\n")}\n`;
@@ -452,7 +462,7 @@ function hasUsableCaptions(content: string): boolean {
   return combineVttSegments([content]).trim() !== "WEBVTT";
 }
 
-function mediaFilename(
+export function mediaFilename(
   meeting: TeamsMeeting,
   extension: "vtt" | "mp4",
 ): string {
@@ -466,7 +476,7 @@ function mediaFilename(
 }
 
 async function downloadRecording(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   meeting: TeamsMeeting,
   meetingId: string,
   recordingId: string,
@@ -498,9 +508,9 @@ async function downloadRecording(
 }
 
 export async function downloadTeamsTranscript(
-  accessToken: string,
+  accessToken: GraphAccessToken,
   meeting: TeamsMeeting,
-  recordingAccessToken: string | null = accessToken,
+  recordingAccessToken: GraphAccessToken | null = accessToken,
 ): Promise<TeamsTranscriptBundle> {
   const meetingId =
     meeting.onlineMeetingId ??
@@ -550,11 +560,11 @@ export async function downloadTeamsTranscript(
   }
 
   const recordingIds = recordingAccessToken
-    ? (meeting.recordingIds?.length
+    ? meeting.recordingIds?.length
       ? meeting.recordingIds
       : (await listMeetingRecordings(recordingAccessToken, meetingId)).map(
-        (recording) => recording.id,
-      ))
+          (recording) => recording.id,
+        )
     : [];
   if (recordingIds.length) {
     try {
@@ -584,6 +594,8 @@ export function getTeamsGraphErrorMessage(error: unknown): string {
   }
 
   switch (error.code) {
+    case "GraphAuthenticationFailed":
+      return error.message;
     case "InvalidAuthenticationToken":
       return "Microsoft Graph rejected the sign-in token. Sign out and sign in again, then retry Teams meetings.";
     case "GraphAccessToTranscriptsDisabled":

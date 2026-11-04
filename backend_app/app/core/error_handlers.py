@@ -33,6 +33,7 @@ def register_error_handlers(app: FastAPI) -> None:
             code=exc.error_code.value,
             status_code=exc.status_code,
             path=request.url.path,
+            field=exc.details.get("field"),
         )
         return error_response(request, exc.status_code, exc.error_code.value, exc.message)
 

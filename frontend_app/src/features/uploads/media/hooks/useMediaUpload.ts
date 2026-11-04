@@ -3,6 +3,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import type { AudioFfmpegMetadata } from "@/lib/ffmpegConvert";
 import type { MediaUploadValues } from "@/shared/schema/audio-upload.schema";
 import type {
   AudioUploadMetadata,
@@ -185,6 +186,7 @@ export interface UseMediaUploadResult {
 }
 
 interface UseMediaUploadOptions {
+  teamsEventId?: string;
   initialMediaFile?: File | null;
   onSuccess?: (jobId: string) => void;
 }
@@ -192,13 +194,13 @@ interface UseMediaUploadOptions {
 export function useMediaUpload(
   options?: UseMediaUploadOptions,
 ): UseMediaUploadResult {
-  const { initialMediaFile, onSuccess } = options ?? {};
+  const { initialMediaFile, onSuccess, teamsEventId } = options ?? {};
   const isMobile = useIsMobile();
   const queryClient = useQueryClient();
 
   // Refs
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const ffmpegDurationRef = useRef<number | undefined>(undefined);
+  const ffmpegMetadataRef = useRef<AudioFfmpegMetadata>({});
   const abortControllerRef = useRef<AbortController | null>(null);
   const activeUploadIdRef = useRef(0);
   const uploadPhaseRef = useRef<UploadPhase>("idle");
@@ -415,7 +417,10 @@ export function useMediaUpload(
   // Validate pre-session form
   const validatePreSessionForm = useCallback(() => {
     if (!hasFormFields) return true;
-    const missing = getMissingRequiredFieldsFromSections(preSessionSections, preSessionFormData);
+    const missing = getMissingRequiredFieldsFromSections(
+      preSessionSections,
+      preSessionFormData,
+    );
 
     if (missing.length > 0) {
       toast.error(`Please fill in required fields: ${missing.join(", ")}`);
@@ -432,7 +437,7 @@ export function useMediaUpload(
       setConversionProgress,
       setConversionStep,
       onMetadata: (meta) => {
-        ffmpegDurationRef.current = meta.durationSeconds;
+        ffmpegMetadataRef.current = meta;
       },
     });
   }, []);
@@ -683,7 +688,7 @@ export function useMediaUpload(
       const originalFile = processedFile;
       const selectedFileType = getFileType(originalFile);
       let uploadMetadata: AudioUploadMetadata | undefined;
-      ffmpegDurationRef.current = undefined;
+      ffmpegMetadataRef.current = {};
 
       if (processedFile) {
         const originalName = processedFile.name;
@@ -703,8 +708,6 @@ export function useMediaUpload(
         (selectedFileType === "audio" || selectedFileType === "video") &&
         isCurrentlyOnline
       ) {
-        const originalFileName = processedFile.name;
-
         try {
           setIsConverting(true);
           setConversionProgress(0);
@@ -712,10 +715,7 @@ export function useMediaUpload(
 
           processedFile = await convertToWav(processedFile);
 
-          if (
-            processedFile.name !== originalFileName ||
-            processedFile.type === "audio/wav"
-          ) {
+          if (ffmpegMetadataRef.current.convertedToWav === true) {
             toast.success("Media converted to WAV format successfully!");
           }
         } catch {
@@ -736,9 +736,12 @@ export function useMediaUpload(
         }
       }
 
-      if (processedFile && (selectedFileType === "audio" || selectedFileType === "video")) {
-        const wasConverted = processedFile !== originalFile;
-        const convertedDurationSeconds = ffmpegDurationRef.current;
+      if (
+        processedFile &&
+        (selectedFileType === "audio" || selectedFileType === "video")
+      ) {
+        const wasConverted = ffmpegMetadataRef.current.convertedToWav === true;
+        const convertedDurationSeconds = ffmpegMetadataRef.current.durationSeconds;
         const meta = await validateAndGetAudioMetadata(processedFile);
         const detectedDurationSeconds =
           meta.isValid && typeof meta.duration === "number"
@@ -784,7 +787,7 @@ export function useMediaUpload(
         await uploadMediaMutation({
           ...values,
           mediaFile: processedFile,
-          uploadMetadata,
+          uploadMetadata: { ...uploadMetadata, teams_event_id: teamsEventId },
           signal: controller.signal,
           uploadId,
         });
@@ -814,6 +817,7 @@ export function useMediaUpload(
     [
       form,
       uploadMediaMutation,
+      teamsEventId,
       validatePreSessionForm,
       convertToWav,
       resetForm,

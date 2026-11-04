@@ -18,10 +18,11 @@ from services.analysis_workflow import (
     get_prompt_inference_settings,
     safe_get_prompt_text,
 )
-from services.artifact_naming import build_analysis_blob_name
+from services.artifact_naming import build_analysis_blob_name, build_reprocess_transcript_blob_name
 from services.analysis_service import AnalysisServiceError
 from services.cosmos_service import CosmosServiceError
 from services.storage_service import StorageServiceError
+from services.transcript_enrichment import enrich_transcript
 
 REPROCESS_ERRORS = (
     AnalysisServiceError,
@@ -166,6 +167,32 @@ class ReprocessService:
                 correlation_id=correlation_id,
             )
 
+            enriched = enrich_transcript(
+                transcription_text,
+                prompt_metadata=prompt_metadata,
+                session_data=job.get("pre_session_form_data"),
+                analysis_service=analysis_service,
+                model=getattr(config, "speaker_identification_model", "gpt-5.6-luna"),
+                job_id=job_id,
+                correlation_id=correlation_id,
+                log_prefix="reprocess",
+            )
+            transcript_updates = {}
+            if enriched.speaker_identification is not None:
+                transcript_updates["speaker_identification"] = enriched.speaker_identification
+            if enriched.text != transcription_text:
+                # A reprocess can create another job. Never overwrite a shared original artifact.
+                transcript_blob_name = build_reprocess_transcript_blob_name(
+                    job.get("file_path", job_id), operation_id=operation_id
+                )
+                transcript_updates["transcription_file_path"] = storage_service.upload_text(
+                    config.storage_recordings_container, transcript_blob_name, enriched.text
+                )
+                transcript_updates["transcription_revision"] = datetime.now(UTC).isoformat()
+                if job.get("text_content"):
+                    transcript_updates["text_content"] = enriched.text
+            transcription_text = enriched.text
+
             analysis_kwargs = build_analysis_kwargs(
                 conversation=transcription_text,
                 context=build_ai_context(
@@ -237,6 +264,7 @@ class ReprocessService:
             target_job, attempt_number = cosmos_service.commit_reprocess_result(
                 str(target_job["id"]),
                 job_updates={
+                    **transcript_updates,
                     "analysis_file_path": analysis_blob_url,
                     "analysis_started_at": analysis_started_at,
                     "analysis_completed_at": completed_at,
@@ -399,6 +427,19 @@ class ReprocessService:
                 "prompt_category_id": target_category,
                 "prompt_subcategory_id": target_subcategory,
                 "created_by_reprocess_job": job.get("id"),
+                **{
+                    key: job[key]
+                    for key in (
+                        "source",
+                        "teams_event_id",
+                        "transcription_revision",
+                        "speaker_identification",
+                        "pre_session_form_data",
+                        "audio_duration_seconds",
+                        "audio_duration_minutes",
+                    )
+                    if key in job
+                },
             },
             True,
         )

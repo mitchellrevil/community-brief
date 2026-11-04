@@ -5,6 +5,7 @@ import {
   combineVttSegments,
   downloadTeamsTranscript,
   escapeODataString,
+  getRecentTeamsMeetingCandidates,
   getRecentTeamsMeetings,
   getTeamsAccessRequestUrl,
   getTeamsGraphErrorMessage,
@@ -46,6 +47,26 @@ describe("Teams Graph API", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     fetchMock.mockReset();
+  });
+
+  it("publishes recent calendar candidates before slower calendar pages finish", async () => {
+    const onMeetings = vi.fn();
+    const event = {
+      id: meeting.id, subject: meeting.subject, isOnlineMeeting: true,
+      onlineMeetingProvider: "teamsForBusiness", onlineMeeting: { joinUrl: meeting.joinUrl },
+      start: { dateTime: meeting.startDateTime }, end: { dateTime: meeting.endDateTime },
+    };
+    let resolveOlderPage!: (response: Response) => void;
+    fetchMock.mockResolvedValueOnce(jsonResponse({ value: [event], "@odata.nextLink": "https://graph.microsoft.com/v1.0/older-page" }))
+      .mockImplementationOnce(() => new Promise((resolve) => { resolveOlderPage = resolve; }));
+    const result = getRecentTeamsMeetingCandidates("token", new Date("2026-07-21T10:00:00Z"), { onMeetings });
+    await vi.waitFor(() => expect(onMeetings).toHaveBeenCalledOnce());
+    expect(onMeetings.mock.calls[0][0][0].id).toBe(meeting.id);
+    const url = new URL(String(fetchMock.mock.calls[0][0]));
+    expect(url.searchParams.get("$top")).toBe("100");
+    expect(url.searchParams.get("$orderby")).toBe("start/dateTime desc");
+    resolveOlderPage(jsonResponse({ value: [] }));
+    expect(await result).toHaveLength(1);
   });
 
   it("paginates and keeps completed Teams meetings from the previous 90 days newest first", async () => {

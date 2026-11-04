@@ -464,6 +464,7 @@ class TestCreateJob:
             prompt_category_id="cat-1",
             prompt_subcategory_id="sub-1",
             pre_session_form_data='{"client":"web"}',
+            teams_event_id=None,
             recording_consent=None,
         )
 
