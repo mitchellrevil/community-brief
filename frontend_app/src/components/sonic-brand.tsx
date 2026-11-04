@@ -9,7 +9,7 @@ export function SonicBrand({ compact = false, className }: SonicBrandProps) {
   return (
     <div
       role="img"
-      aria-label="Sonic Brief"
+      aria-label="Community Brief"
       className={cn(
         "text-sidebar-foreground flex shrink-0 items-center",
         className,
@@ -25,9 +25,9 @@ export function SonicBrand({ compact = false, className }: SonicBrandProps) {
       {!compact && (
         <span
           aria-hidden="true"
-          className="ml-4 flex flex-col text-[1.625rem] leading-[1.05] font-bold tracking-tight"
+          className="ml-3 flex flex-col text-[1.375rem] leading-[1.05] font-bold tracking-tight"
         >
-          <span>Sonic</span>
+          <span>Community</span>
           <span>Brief</span>
         </span>
       )}
