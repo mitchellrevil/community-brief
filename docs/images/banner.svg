@@ -2,10 +2,10 @@
   <title>Community Brief</title>
   <desc>Recording, transcription and meeting analysis.</desc>
   <rect width="1440" height="240" rx="12" fill="#111827"/>
-  <g transform="translate(64 71)">
-    <path d="M53 4h30v82H53V4Z" stroke="#38bdf8" stroke-width="8" stroke-linejoin="round"/>
-    <path d="M6 59h18l10-25 12 41 12-25 10 9h21" stroke="#f8fafc" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
-  </g>
+  <circle cx="106" cy="120" r="62" fill="#7c3aed"/>
+  <svg x="86" y="74" width="40" height="92" viewBox="0 0 440 1000">
+    <path fill="#fff" d="M320 0C388-4 430 37 430 94C430 148 395 171 344 204C275 249 240 284 240 333C240 378 271 411 310 452C362 507 402 560 402 637C402 765 280 925 166 981C108 1010 43 1005 15 968C-17 924 1 879 44 830C94 773 180 719 180 655C180 612 147 566 105 511C52 442 18 395 18 333C18 204 178 7 320 0Z"/>
+  </svg>
   <text x="198" y="119" font-family="Segoe UI,Arial,sans-serif" font-size="54" font-weight="650" fill="#f8fafc">Community Brief</text>
   <text x="201" y="164" font-family="Segoe UI,Arial,sans-serif" font-size="24" fill="#cbd5e1">Recording, transcription and meeting analysis.</text>
 </svg>

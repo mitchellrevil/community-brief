@@ -163,8 +163,23 @@ const page = await context.newPage();
 page.setDefaultTimeout(15000);
 page.on("pageerror", (error) => console.error("PAGE ERROR:", error.message));
 async function capture(name) {
+  await page.evaluate(() => {
+    window.scrollTo(0, 0);
+    for (const element of document.querySelectorAll("*")) {
+      if (element.scrollTop) element.scrollTop = 0;
+    }
+  });
   await page.evaluate(() => document.fonts.ready);
   await page.waitForTimeout(650); // Let route transitions and responsive layout settle.
+  if (page.viewportSize().width >= 768)
+    await page
+      .getByRole("img", { name: "Community Brief", exact: true })
+      .first()
+      .waitFor();
+  if (await page.locator('img[src="/logo.png"]').count())
+    throw new Error(
+      "The obsolete logo is still present; capture the current branding.",
+    );
   if (await page.getByText("An error occurred", { exact: true }).count())
     throw new Error("Resolve the fixture error before publishing screenshots.");
   await page.screenshot({ path: `${out}/${name}.png`, animations: "disabled" });
