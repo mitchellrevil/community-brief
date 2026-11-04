@@ -21,6 +21,7 @@ import type { LinkOptions } from "@tanstack/react-router";
 import { useTutorialOptional } from "@/app/contexts/tutorial-context";
 import { isDevelopmentBannerEnabled } from "@/components/development-server-banner";
 import { isHelpPageEnabled } from "@/config/features";
+import { SonicBrand } from "@/components/sonic-brand";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -503,18 +504,14 @@ export function AppSidebar({ children }: AppSidebarProps) {
             sidebarLayout === "top" ? "md:flex-row" : "md:flex-col",
           )}
         >
-          {sidebarLayout === "left" && isOpen && (
-            <div className="bg-sidebar flex h-24 w-full flex-shrink-0 items-center justify-center overflow-hidden pt-4 transition-all duration-300 md:h-24">
-              <img
-                src="/logo.png"
-                alt="Community Brief Logo"
-                className={cn(
-                  "h-full w-full object-contain transition-all duration-300",
-                  "opacity-100",
-                )}
-              />
-            </div>
-          )}
+          <div
+            className={cn(
+              "bg-sidebar flex shrink-0 items-center justify-center overflow-hidden",
+              sidebarLayout === "top" ? "h-16 px-4" : isOpen ? "h-24 px-4 py-4" : "h-20 px-2 py-4",
+            )}
+          >
+            <SonicBrand compact={sidebarLayout === "top" || !isOpen} />
+          </div>
 
           <nav
             aria-label="Primary"

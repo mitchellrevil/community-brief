@@ -13,7 +13,7 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'logo.png', 'logo192.png', 'logo512.png'],
+      includeAssets: ['favicon.svg', 'favicon.ico', 'sonic-mark.svg', 'logo.png', 'logo192.png', 'logo512.png'],
       manifest: {
         name: 'Community Brief',
         short_name: 'Community Brief',
